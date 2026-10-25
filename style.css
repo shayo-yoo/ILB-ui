@@ -1,0 +1,878 @@
+/* 声明式 UI · P1 样式
+   所有选择器以 .dshui- 开头，避免污染 SillyTavern 主题。 */
+
+.dshui-root {
+  --dshui-bg: rgba(22, 24, 30, 0.97);
+  --dshui-fg: #e9eaee;
+  --dshui-dim: #9aa0ab;
+  --dshui-line: rgba(255, 255, 255, 0.09);
+  --dshui-cell: rgba(255, 255, 255, 0.045);
+  --dshui-accent: #7aa2ff;
+  --dshui-ok: #7fd18a;
+  --dshui-warn: #e6c35c;
+  --dshui-bad: #ef7a7a;
+  --dshui-radius: 12px;
+  color: var(--dshui-fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+/* ---------- 浮窗 ---------- */
+.dshui-fab {
+  position: fixed;
+  right: 12px;
+  /* 同上：不用 bottom，用视口高度推位置，避开窄屏下 0 高度的包含块 */
+  top: calc(100vh - 60px);
+  top: calc(100dvh - 60px);
+  z-index: 4000;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--dshui-line);
+  background: var(--dshui-bg);
+  color: var(--dshui-fg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.dshui-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.dshui-fab.is-open {
+  /* 抽屉开着时浮窗被面板盖住也没用，直接藏掉；收起走面板右上角的 × */
+  display: none;
+}
+
+.dshui-fab-glyph {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ---------- 抽屉 ---------- */
+.dshui-panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 4000;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  /* 高度用视口高度算死，不用 top+bottom 拉伸：ST 窄屏（≤1000px）把 body 设成
+     position:fixed，此时 <html> 高度为 0，若它又成了 fixed 的包含块（transform），
+     bottom 锚点会落到视口上方，抽屉会塌成 2px 高。100vh/dvh 不受这个影响。 */
+  height: calc(100vh - 24px);
+  height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--dshui-bg);
+  border: 1px solid var(--dshui-line);
+  border-radius: var(--dshui-radius);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+}
+
+.dshui-panel[hidden] {
+  display: none;
+}
+
+.dshui-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--dshui-line);
+  flex: 0 0 auto;
+}
+
+.dshui-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: 1 1 auto;
+}
+
+.dshui-build {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--dshui-dim);
+  border: 1px solid var(--dshui-line);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+.dshui-close {
+  border: 0;
+  background: transparent;
+  color: var(--dshui-dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.dshui-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--dshui-fg);
+}
+
+/* ---------- 状态点 ---------- */
+.dshui-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--dshui-dim);
+}
+
+.dshui-dot.is-ok {
+  background: var(--dshui-ok);
+  box-shadow: 0 0 0 3px rgba(127, 209, 138, 0.15);
+}
+
+.dshui-dot.is-warn {
+  background: var(--dshui-warn);
+  box-shadow: 0 0 0 3px rgba(230, 195, 92, 0.15);
+}
+
+.dshui-dot.is-bad {
+  background: var(--dshui-bad);
+  box-shadow: 0 0 0 3px rgba(239, 122, 122, 0.15);
+}
+
+.dshui-status {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--dshui-dim);
+  border-bottom: 1px solid var(--dshui-line);
+  flex: 0 0 auto;
+  word-break: break-word;
+}
+
+.dshui-note {
+  padding: 8px 12px 0;
+  font-size: 11px;
+  color: var(--dshui-dim);
+  flex: 0 0 auto;
+}
+
+.dshui-note.is-sample {
+  color: var(--dshui-warn);
+}
+
+/* ---------- 主体 ---------- */
+.dshui-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 10px;
+}
+
+.dshui-vars {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+
+.dshui-vars-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--dshui-dim);
+  padding: 2px 0 6px;
+}
+
+.dshui-vars-label {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.dshui-vars-hint {
+  opacity: 0.65;
+}
+
+.dshui-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.dshui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--dshui-cell);
+  border: 1px solid transparent;
+  font-size: 12px;
+  color: inherit;
+  font-family: inherit;
+}
+
+button.dshui-chip {
+  cursor: pointer;
+}
+
+button.dshui-chip:hover {
+  border-color: var(--dshui-accent);
+  background: rgba(122, 162, 255, 0.12);
+}
+
+.dshui-chip-name {
+  opacity: 0.75;
+}
+
+.dshui-chip-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dshui-empty {
+  padding: 12px;
+  border: 1px dashed var(--dshui-line);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--dshui-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.dshui-small-btn {
+  border: 1px solid var(--dshui-line);
+  background: rgba(122, 162, 255, 0.12);
+  color: var(--dshui-fg);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dshui-small-btn:hover {
+  border-color: var(--dshui-accent);
+}
+
+/* ---------- 网格 ---------- */
+.dshui-grid {
+  flex: 0 0 auto;
+  margin: 0 12px;
+  border-radius: 10px;
+}
+
+/* 编辑时把剩余空间给预览区，但别把编辑区挤没；两者之间可拖动 */
+.dshui-body.is-editing {
+  overflow: hidden;
+}
+
+.dshui-body.is-editing .dshui-grid {
+  flex: 1 1 auto;
+  min-height: 72px;
+  overflow: auto;
+  align-content: start;
+}
+
+.dshui-splitter {
+  flex: 0 0 auto;
+  height: 12px;
+  margin: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.dshui-splitter[hidden] {
+  display: none;
+}
+
+.dshui-splitter::after {
+  content: '';
+  width: 46px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--dshui-line);
+}
+
+.dshui-splitter:hover::after,
+.dshui-body.is-dragging .dshui-splitter::after {
+  background: var(--dshui-accent);
+}
+
+.dshui-body.is-dragging {
+  user-select: none;
+}
+
+.dshui-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--dshui-cell);
+  border: 1px solid var(--dshui-line);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  overflow: hidden;
+}
+
+.dshui-cell.dshui-kind-text {
+  border-style: dashed;
+  background: transparent;
+  justify-content: flex-start;
+}
+
+.dshui-cell.dshui-kind-button {
+  cursor: pointer;
+  background: rgba(122, 162, 255, 0.12);
+  border-color: rgba(122, 162, 255, 0.3);
+  transition: background 100ms ease;
+}
+
+.dshui-cell.dshui-kind-button:hover {
+  background: rgba(122, 162, 255, 0.22);
+}
+
+.dshui-cell-label {
+  font-size: 11px;
+  color: var(--dshui-dim);
+  letter-spacing: 0.02em;
+}
+
+.dshui-cell-text {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.dshui-kind-text .dshui-cell-text {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dshui-dim);
+}
+
+.dshui-kind-button .dshui-cell-text {
+  font-size: 13px;
+}
+
+.dshui-cell-sub {
+  font-size: 10px;
+  color: var(--dshui-dim);
+  opacity: 0.7;
+}
+
+.dshui-tone-ok .dshui-cell-text {
+  color: var(--dshui-ok);
+  font-variant-numeric: tabular-nums;
+}
+
+.dshui-tone-warn .dshui-cell-text {
+  color: var(--dshui-warn);
+}
+
+.dshui-tone-muted .dshui-cell-text {
+  color: var(--dshui-dim);
+  font-weight: 400;
+}
+
+.dshui-cell.is-degraded {
+  outline: 1px dashed var(--dshui-warn);
+  outline-offset: -2px;
+}
+
+.dshui-cell[style*="grid-column"] {
+  min-height: 0;
+}
+
+/* ---------- 底部消息 ---------- */
+.dshui-foot {
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--dshui-dim);
+  border-top: 1px solid var(--dshui-line);
+  word-break: break-word;
+}
+
+.dshui-foot.is-ok {
+  color: var(--dshui-ok);
+}
+
+.dshui-foot.is-bad {
+  color: var(--dshui-bad);
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 520px) {
+  .dshui-panel {
+    width: calc(100vw - 24px);
+    top: 12px;
+    height: calc(100vh - 84px);
+    height: calc(100dvh - 84px);
+  }
+
+  .dshui-fab {
+    width: 44px;
+    height: 44px;
+    top: calc(100vh - 56px);
+    top: calc(100dvh - 56px);
+  }
+
+  .dshui-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .dshui-layout-select {
+    max-width: 100%;
+  }
+
+  .dshui-editor-actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---------- P2：工具栏 / 编辑器 / 新控件 ---------- */
+.dshui-head-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dshui-line);
+  background: transparent;
+  color: var(--dshui-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dshui-head-btn:hover {
+  color: var(--dshui-fg);
+  border-color: var(--dshui-accent);
+}
+
+.dshui-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dshui-line);
+}
+
+.dshui-layout-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dshui-fg);
+  font-size: 12px;
+}
+
+.dshui-scope-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--dshui-dim);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* bar */
+.dshui-kind-bar {
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+}
+
+.dshui-bar-value {
+  font-size: 15px;
+}
+
+.dshui-bar-track {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.dshui-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--dshui-ok);
+  transition: width 140ms ease;
+}
+
+.dshui-tone-warn .dshui-bar-fill {
+  background: var(--dshui-warn);
+}
+
+.dshui-tone-bad .dshui-bar-fill {
+  background: var(--dshui-bad);
+}
+
+.dshui-tone-muted .dshui-bar-fill {
+  background: var(--dshui-dim);
+}
+
+/* toggle */
+.dshui-kind-toggle[aria-pressed="true"] {
+  border-color: var(--dshui-ok);
+  background: rgba(127, 209, 138, 0.12);
+}
+
+.dshui-kind-toggle.is-missing {
+  opacity: 0.6;
+}
+
+/* list */
+.dshui-kind-list {
+  align-items: stretch;
+}
+
+.dshui-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dshui-list-item {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--dshui-fg);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dshui-list-item:hover {
+  border-color: var(--dshui-accent);
+}
+
+.dshui-list-item.is-passive {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* 编辑器 */
+.dshui-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--dshui-line);
+}
+
+/* 编辑时默认给编辑区一半高度；拖动条会写内联高度覆盖它 */
+.dshui-body.is-editing .dshui-editor {
+  flex: 0 0 auto;
+  height: 50%;
+  min-height: 140px;
+  padding: 8px 12px 0;
+  margin-top: 2px;
+  border-top: 0;
+}
+
+.dshui-editor[hidden] {
+  display: none;
+}
+
+.dshui-editor-hint {
+  font-size: 11px;
+  color: var(--dshui-dim);
+  line-height: 1.4;
+}
+
+.dshui-editor-text {
+  flex: 1 1 auto;
+  min-height: 140px;
+  resize: vertical;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--dshui-fg);
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+
+.dshui-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 抽屉只有 336px 宽时，“应用/保存（全局）”别被挤成竖排 */
+.dshui-editor-actions .dshui-small-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.dshui-issues {
+  max-height: 30vh;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dshui-issue.is-error {
+  color: var(--dshui-bad);
+}
+
+.dshui-issue.is-warn {
+  color: var(--dshui-warn);
+}
+
+.dshui-issue.is-ok {
+  color: var(--dshui-ok);
+}
+
+.dshui-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dshui-foot-text {
+  flex: 1 1 auto;
+}
+
+.dshui-foot-more {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+/* ---------- P3/P4：页面标签 / 表单 / 导入导出 ---------- */
+.dshui-tools {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 12px 6px;
+}
+
+.dshui-danger-btn:hover {
+  border-color: var(--dshui-bad);
+  color: var(--dshui-bad);
+}
+
+.dshui-pages {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 8px 12px 0;
+}
+
+.dshui-pages:empty {
+  display: none;
+}
+
+.dshui-page-tab {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dshui-line);
+  background: transparent;
+  color: var(--dshui-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dshui-page-tab.is-active {
+  border-color: var(--dshui-accent);
+  background: rgba(120, 170, 255, 0.12);
+  color: var(--dshui-fg);
+}
+
+.dshui-mode-row {
+  display: flex;
+  gap: 4px;
+}
+
+.dshui-mode-btn {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dshui-line);
+  background: transparent;
+  color: var(--dshui-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dshui-mode-btn.is-active {
+  border-color: var(--dshui-accent);
+  color: var(--dshui-fg);
+}
+
+.dshui-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.dshui-form[hidden],
+.dshui-import[hidden] {
+  display: none;
+}
+
+.dshui-form-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.dshui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 110px;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--dshui-dim);
+}
+
+.dshui-field-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dshui-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--dshui-fg);
+  font-size: 12px;
+}
+
+.dshui-select {
+  padding: 4px 4px;
+}
+
+.dshui-form-subhead {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--dshui-dim);
+}
+
+.dshui-form-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dshui-form-cell {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.dshui-form-cell-pick {
+  flex: 1 1 auto;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dshui-form-cell-pick.is-active {
+  border-color: var(--dshui-accent);
+  color: var(--dshui-accent);
+}
+
+.dshui-icon-btn {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.dshui-cell-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px dashed var(--dshui-line);
+  border-radius: 8px;
+}
+
+.dshui-cell-form-id {
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-size: 10px;
+  color: var(--dshui-dim);
+}
+
+.dshui-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dshui-list-text,
+.dshui-action-args {
+  resize: vertical;
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+}
+
+.dshui-import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dshui-import-text {
+  min-height: 90px;
+  resize: vertical;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--dshui-fg);
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+}
+
+.dshui-import-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+

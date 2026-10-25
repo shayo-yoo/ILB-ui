@@ -1,0 +1,10 @@
+{
+  "name": "dsh-ui",
+  "private": true,
+  "type": "module",
+  "version": "0.3.1",
+  "description": "声明式网格 UI 扩展（基于 ILB api）",
+  "scripts": {
+    "test": "node tests/run.mjs"
+  }
+}
