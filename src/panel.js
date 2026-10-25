@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.5.0';
+export const VERSION = '0.5.1';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -121,8 +121,8 @@ export function init(options = {}) {
 
   const fab = el('button', 'dshui-fab');
   fab.setAttribute('type', 'button');
-  fab.setAttribute('title', '声明式 UI：点一下展开/收起，按住上下拖可换位置');
-  fab.setAttribute('aria-label', '打开声明式 UI');
+  fab.setAttribute('title', 'ILBUI：点一下展开/收起，按住上下拖可换位置');
+  fab.setAttribute('aria-label', '打开 ILBUI');
   fab.setAttribute('aria-expanded', 'false');
   const fabGlyph = el('span', 'dshui-fab-glyph');
   fabGlyph.textContent = '⋮';
@@ -131,12 +131,12 @@ export function init(options = {}) {
   const panel = el('section', 'dshui-panel');
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', '声明式 UI');
+  panel.setAttribute('aria-label', 'ILBUI');
 
   const head = el('header', 'dshui-head');
   const dot = el('span', 'dshui-dot');
   const title = el('span', 'dshui-head-title');
-  title.textContent = '声明式 UI';
+  title.textContent = 'ILBUI';
   const build = el('span', 'dshui-build');
   build.textContent = `v${VERSION}`;
   build.title = '扩展版本；如果这里不是最新版本，强制刷新（Ctrl+Shift+R）';

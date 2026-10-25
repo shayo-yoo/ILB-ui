@@ -65,7 +65,7 @@ export function importText(text) {
   if (parsed.kind !== undefined && parsed.kind !== SHARE_KIND) {
     return {
       ok: false,
-      errors: [{ path: 'kind', message: `这不是声明式 UI 的布局文件（kind=${JSON.stringify(parsed.kind)}）` }],
+      errors: [{ path: 'kind', message: `这不是 ILBUI 的布局文件（kind=${JSON.stringify(parsed.kind)}）` }],
       warnings: [],
       message: '文件类型不对',
     };

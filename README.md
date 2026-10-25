@@ -1,6 +1,6 @@
-# 声明式 UI（dsh-ui）
+# ILBUI
 
-SillyTavern 扩展：把聊天变量渲染成一张**可看、可点**的网格界面，点击只会改变量，不懂代码也能用表单搭出来。
+SillyTavern 扩展 **ILBUI**：把聊天变量渲染成一张**可看、可点**的网格界面，点击只会改变量，不懂代码也能用表单搭出来。
 
 它本身几乎不执行逻辑——只负责"显示"和"把点击翻译成 set / add / call"，真正的规则交给 [ILB](https://github.com/shayo-yoo/ILB)（Immersive Logic Board）的逻辑或下一轮 AI。
 
@@ -19,6 +19,9 @@ SillyTavern/public/scripts/extensions/third-party/dsh-ui
 ```
 
 然后刷新页面（脚本是 ES module，改过代码要 **Ctrl+Shift+R**）。屏幕右边缘出现 ⋮ 把手即加载成功。
+
+> 显示名统一为 **ILBUI**。目录名与内部标识仍是 dsh-ui（dshui- CSS 前缀、dshui/1 schema、dshui.* 存储键），改掉会让已存布局与分享文件全部失效，因此保留。
+
 
 > 操作细节、全部字段、与 ILB 的联动方式、常见问题，都写在 **[docs/使用说明.md](docs/使用说明.md)**；界面里的 `?` 是同一份内容的精简版。
 
