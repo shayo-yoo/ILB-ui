@@ -77,7 +77,7 @@ check('初始化：浮窗在、抽屉收起', () => {
   assert.ok(globalThis.DSHUI === ui);
   const fab = findByClass(doc.body, 'dshui-fab');
   assert.ok(fab);
-  assert.ok(fab.textContent.includes('▦'));
+  assert.ok(fab.textContent.includes('⋮'));
   const panel = findByClass(doc.body, 'dshui-panel');
   assert.equal(panel.hidden, true);
   assert.ok(findByClass(doc.body, 'dshui-status').textContent.includes('接口 v1.1'));
@@ -85,14 +85,16 @@ check('初始化：浮窗在、抽屉收起', () => {
   assert.equal(globalThis.DSHUI, undefined);
 });
 
-check('点浮窗：打开抽屉、浮窗隐藏、状态写进 storage', () => {
+check('点浮窗：打开抽屉、浮窗姿态、状态写进 storage', () => {
   const { doc, storage } = makeEnv();
   const ui = initPanel(doc, storage);
   findByClass(doc.body, 'dshui-fab').click();
   const panel = findByClass(doc.body, 'dshui-panel');
   assert.equal(panel.hidden, false);
   assert.ok(findByClass(doc.body, 'dshui-fab').classList.contains('is-open'));
-  assert.deepEqual(JSON.parse(storage.getItem('dshui.ui.v1')), { open: true });
+  const saved = JSON.parse(storage.getItem('dshui.ui.v1'));
+  assert.equal(saved.open, true);
+  assert.ok(Number.isFinite(saved.handleY), '把手高度也要一起记住');
   ui.close();
   assert.equal(panel.hidden, true);
   ui.destroy();

@@ -16,41 +16,49 @@
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 
-/* ---------- 浮窗 ---------- */
+/* ---------- 侧边把手（替代原来的圆形浮球） ---------- */
 .dshui-fab {
   position: fixed;
-  right: 12px;
-  /* 同上：不用 bottom，用视口高度推位置，避开窄屏下 0 高度的包含块 */
-  top: calc(100vh - 60px);
-  top: calc(100dvh - 60px);
-  z-index: 4000;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
+  right: -10px; /* 宽 22，只露 12px */
+  z-index: 3999; /* 在面板（4000）之下：展开时被面板压住，像抽屉拉手 */
+  width: 22px;
+  height: 88px;
+  padding: 0;
   border: 1px solid var(--dshui-line);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
   background: var(--dshui-bg);
   color: var(--dshui-fg);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: -4px 0 14px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  touch-action: none;
+  transition: right 160ms ease, box-shadow 120ms ease;
 }
 
-.dshui-fab:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+.dshui-fab:hover,
+.dshui-fab:focus-visible {
+  right: -4px; /* 悬停时多露一点，提示可以拖 */
+  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.4);
+}
+
+.dshui-fab.is-dragging {
+  transition: none;
+  cursor: grabbing;
 }
 
 .dshui-fab.is-open {
-  /* 抽屉开着时浮窗被面板盖住也没用，直接藏掉；收起走面板右上角的 × */
-  display: none;
+  right: auto; /* 位置由 JS 按面板左缘算 */
+  border-radius: 12px 0 0 12px;
 }
 
 .dshui-fab-glyph {
-  font-size: 20px;
+  font-size: 13px;
   line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 /* ---------- 抽屉 ---------- */
@@ -429,13 +437,6 @@ button.dshui-chip:hover {
     top: 12px;
     height: calc(100vh - 84px);
     height: calc(100dvh - 84px);
-  }
-
-  .dshui-fab {
-    width: 44px;
-    height: 44px;
-    top: calc(100vh - 56px);
-    top: calc(100dvh - 56px);
   }
 
   .dshui-toolbar {

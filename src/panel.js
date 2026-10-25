@@ -32,9 +32,10 @@ import {
 } from './schema.js';
 import { formatIssues, validateLayout } from './validate.js';
 import { exportText, fileNameFor, importText } from './share.js';
+import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './placement.js';
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 
-export const VERSION = '0.3.1';
+export const VERSION = '0.4.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -101,6 +102,7 @@ export function init(options = {}) {
     importText: '',
     purgeArmed: false,
     editorHeight: Number(store.loadUi().editorHeight) || 0, // 0 = 用 CSS 默认
+    handleY: Number(store.loadUi().handleY) || 0, // 0 = 用默认位置（视口 62%）
   };
   let cancelWait = null;
 
@@ -109,16 +111,18 @@ export function init(options = {}) {
     if (cls) node.className = cls;
     return node;
   };
+  const win = doc.defaultView ?? globalThis;
 
   // ---------- 结构 ----------
   const root = el('div', 'dshui-root');
 
   const fab = el('button', 'dshui-fab');
   fab.setAttribute('type', 'button');
-  fab.setAttribute('title', '声明式 UI');
+  fab.setAttribute('title', '声明式 UI：点一下展开/收起，按住上下拖可换位置');
   fab.setAttribute('aria-label', '打开声明式 UI');
+  fab.setAttribute('aria-expanded', 'false');
   const fabGlyph = el('span', 'dshui-fab-glyph');
-  fabGlyph.textContent = '▦';
+  fabGlyph.textContent = '⋮';
   fab.append(fabGlyph);
 
   const panel = el('section', 'dshui-panel');
@@ -322,7 +326,55 @@ export function init(options = {}) {
     fab.setAttribute('aria-expanded', state.open ? 'true' : 'false');
     if (state.open) fab.classList.add('is-open');
     else fab.classList.remove('is-open');
-    if (save) store.saveUi({ open: state.open });
+    positionHandle();
+    if (save) store.saveUi({ open: state.open, handleY: state.handleY });
+  }
+
+  // ---------- 侧边把手 ----------
+  function handleMaxTop() {
+    const send = typeof doc.querySelector === 'function' ? doc.querySelector('#send_form') : null;
+    let sendTop = NaN;
+    if (send && typeof send.getBoundingClientRect === 'function') {
+      const r = send.getBoundingClientRect();
+      if (r && r.height > 0) sendTop = r.top;
+    }
+    return maxHandleTop({ viewportHeight: win.innerHeight || 800, sendFormTop: sendTop, height: HANDLE.height });
+  }
+
+  /** 别的球（ILB）已经占住的位置；只避让，不接管。 */
+  function takenBoxes() {
+    const out = [];
+    if (typeof doc.querySelectorAll !== 'function') return out;
+    for (const node of doc.querySelectorAll('.ilb-fab')) {
+      if (!node || node === fab) continue;
+      const r = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null;
+      if (r && r.height > 0 && r.width > 0) out.push({ top: r.top, bottom: r.bottom });
+    }
+    return out;
+  }
+
+  function positionHandle() {
+    if (state.disposed) return;
+    const maxTop = handleMaxTop();
+    let y = clampHandleY(state.handleY || Math.round((win.innerHeight || 800) * 0.62), {
+      top: HANDLE.edge,
+      maxTop,
+      height: HANDLE.height,
+    });
+    if (!state.open) {
+      y = avoidTaken(y, takenBoxes(), { height: HANDLE.height, gap: HANDLE.gap, min: HANDLE.edge, max: maxTop });
+      y = clampHandleY(y, { top: HANDLE.edge, maxTop, height: HANDLE.height });
+    }
+    state.handleY = y;
+    fab.style.top = `${y}px`;
+    if (state.open) {
+      const rect = typeof panel.getBoundingClientRect === 'function' ? panel.getBoundingClientRect() : null;
+      if (rect && rect.width > 0) fab.style.left = `${handleLeft({ panelLeft: rect.left })}px`;
+      fab.style.right = 'auto';
+    } else {
+      fab.style.left = 'auto';
+      fab.style.right = '';
+    }
   }
 
   function setMsg(tone, text) {
@@ -1228,7 +1280,44 @@ export function init(options = {}) {
   }
 
   // ---------- 事件 ----------
+  let drag = null;
+  fab.addEventListener('pointerdown', (event) => {
+    if (event.button != null && event.button !== 0) return;
+    drag = { startY: event.clientY, origin: state.handleY, moved: false };
+    try {
+      fab.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+    fab.classList.add('is-dragging');
+  });
+  fab.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dy) > 4) drag.moved = true;
+    if (!drag.moved) return;
+    const maxTop = handleMaxTop();
+    state.handleY = clampHandleY(drag.origin + dy, { top: HANDLE.edge, maxTop, height: HANDLE.height });
+    positionHandle();
+    event.preventDefault?.();
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    fab.classList.remove('is-dragging');
+    if (moved) {
+      state.suppressClick = true;
+      store.saveUi({ handleY: state.handleY });
+      setTimeout(() => {
+        state.suppressClick = false;
+      }, 0);
+    }
+  };
+  fab.addEventListener('pointerup', endDrag);
+  fab.addEventListener('pointercancel', endDrag);
   fab.addEventListener('click', () => {
+    if (state.suppressClick) return;
     state.open = !state.open;
     applyOpen();
     render();
@@ -1427,6 +1516,7 @@ export function init(options = {}) {
     },
     render,
     probe,
+    reposition: positionHandle,
     destroy,
     root,
   };

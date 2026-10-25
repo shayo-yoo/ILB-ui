@@ -5,7 +5,8 @@ SillyTavern 扩展：把聊天变量渲染成一张**可看、可点**的网格�
 它本身几乎不执行逻辑——只负责"显示"和"把点击翻译成 set / add / call"，真正的规则交给 [ILB](https://github.com/shayo-yoo/ILB)（Immersive Logic Board）的逻辑或下一轮 AI。
 
 - 依赖：ILB **0.12.0+**，`window.ILB.api` 接口 **v1.1**
-- 形态：右下角 ▦ 浮窗 + 右侧抽屉；窄屏自适应
+- 形态：右侧贴边把手（半隐）+ 抽屉；把手可上下拖、记位置、避开 ILB 的球；窄屏自适应
+- 收纳：多个悬浮球时，本扩展只避让不接管（接管要等失败记录和恢复入口齐了再做）
 - 存储：`localStorage`（全局 / 角色卡两种作用域），不写 `extension_settings`，不改 prompt
 
 ## 安装
