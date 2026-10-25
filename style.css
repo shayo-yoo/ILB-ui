@@ -877,3 +877,55 @@ button.dshui-chip:hover {
 }
 
 
+
+/* ---------- 使用说明 ---------- */
+.dshui-help {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 12px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.dshui-help-sec {
+  margin: 12px 0;
+}
+
+.dshui-help-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dshui-accent);
+}
+
+.dshui-help-text,
+.dshui-help-note {
+  margin: 4px 0;
+}
+
+.dshui-help-note {
+  font-size: 11px;
+  color: var(--dshui-dim);
+}
+
+.dshui-help-list {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.dshui-help-list li {
+  margin: 3px 0;
+}
+
+.dshui-help-code {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--dshui-fg);
+  font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+}

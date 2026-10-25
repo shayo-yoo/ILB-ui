@@ -415,6 +415,42 @@ check('编辑器：JSON → 表单 往返切换（切完只显示表单）', () 
   ui.destroy();
 });
 
+check('使用说明：? 打开、返回关闭，含 ILB 联动章节', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const helpBtn = findAllByClass(doc.body, 'dshui-head-btn').find((n) => n.textContent === '?');
+  assert.ok(helpBtn, '标题栏应有帮助按钮');
+
+  helpBtn.click();
+  const help = findByClass(doc.body, 'dshui-help');
+  assert.notEqual(help.style.display, 'none', '点 ? 显示使用说明');
+  assert.ok(help.textContent.includes('和 ILB 联动'));
+  assert.ok(findAllByClass(help, 'dshui-help-sec').length >= 10, '说明应分多节');
+  assert.equal(findByClass(doc.body, 'dshui-body').style.display, 'none', '看说明时收起正文');
+
+  buttonByExactText(doc, '返回').click();
+  assert.equal(help.style.display, 'none', '点返回关闭说明');
+  assert.notEqual(findByClass(doc.body, 'dshui-body').style.display, 'none', '正文回来');
+  ui.destroy();
+});
+
+check('表单：控件类型显示中文，存的仍是英文 kind', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+
+  const optionTexts = [];
+  for (const select of findAllByClass(doc.body, 'dshui-select')) {
+    for (const opt of select.children) {
+      if (opt.tagName === 'option') optionTexts.push(opt.textContent);
+    }
+  }
+  assert.ok(optionTexts.includes('状态'));
+  assert.ok(optionTexts.includes('按钮'));
+  assert.ok(!optionTexts.includes('stat'), '界面里不该露出英文 kind');
+  ui.destroy();
+});
+
 check('编辑区：拖动条只在编辑时出现，记住上次高度', () => {
   const { doc, storage } = makeEnv({ storage: { 'dshui.ui.v1': JSON.stringify({ open: false, editorHeight: 420 }) } });
   const ui = initPanel(doc, storage);

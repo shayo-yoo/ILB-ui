@@ -6,6 +6,7 @@ SillyTavern 扩展：把聊天变量渲染成一张**可看、可点**的网格�
 
 - 依赖：ILB **0.12.0+**，`window.ILB.api` 接口 **v1.1**
 - 形态：右侧贴边把手（半隐）+ 抽屉；把手可上下拖、记位置、避开 ILB 的球；窄屏自适应
+- 帮助：抽屉标题栏 `?` 打开内嵌使用说明；完整版见 [docs/使用说明.md](docs/使用说明.md)
 - 收纳：多个悬浮球时，本扩展只避让不接管（接管要等失败记录和恢复入口齐了再做）
 - 存储：`localStorage`（全局 / 角色卡两种作用域），不写 `extension_settings`，不改 prompt
 
@@ -17,14 +18,16 @@ SillyTavern 扩展：把聊天变量渲染成一张**可看、可点**的网格�
 SillyTavern/public/scripts/extensions/third-party/dsh-ui
 ```
 
-然后刷新页面（脚本是 ES module，改过代码要 **Ctrl+Shift+R**）。右下角出现 ▦ 即加载成功。
+然后刷新页面（脚本是 ES module，改过代码要 **Ctrl+Shift+R**）。屏幕右边缘出现 ⋮ 把手即加载成功。
+
+> 操作细节、全部字段、与 ILB 的联动方式、常见问题，都写在 **[docs/使用说明.md](docs/使用说明.md)**；界面里的 `?` 是同一份内容的精简版。
 
 ## 三分钟上手
 
 1. 先让变量存在。在聊天里发一条让 ILB 写入变量的消息，或在 ILB 面板里手动设：
    `金币=10`、`生命=100`、`心情=平静`。
-2. 点 ▦ → 「载入示例布局」→ 预览里出现示例面板（金币/生命/心情 + 喝药水）。
-3. 点 ▦ → 「编辑」：默认就是表单。改标题、点「＋控件」、选类型、填变量与动作，点「应用」看效果。
+2. 点右边缘 ⋮ → 「载入示例布局」→ 预览里出现示例面板（金币/生命/心情 + 喝药水）。
+3. 点 ⋮ → 「编辑」：默认就是表单。改标题、点「＋控件」、选类型（**下拉里是中文**）、填变量与动作，点「应用」看效果。
 4. 满意后「保存（全局）」或「保存（角色卡）」。刷新页面仍然在。
 5. 「导出」得到一份 JSON，发给别人；对方「导入」→ 校验 → 进入预览 → 自己保存。
 
@@ -58,19 +61,19 @@ SillyTavern/public/scripts/extensions/third-party/dsh-ui
 ```
 
 - `area: [col, row, colSpan, rowSpan]`，**从 0 开始**；越界/重叠会校验（重叠只警告）。
-- 控件：`stat` / `text` / `button` / `bar` / `number` / `toggle` / `list`。
+- 控件：`stat` 状态 / `text` 文本 / `button` 按钮 / `bar` 条形 / `number` 数字 / `toggle` 开关 / `list` 列表。
 - 动作：`set` / `add` / `call` / `open`；`call` 走 ILB 的 logic 候选，三种结果（成功/拒绝/空结果）都有回执。
 - 条件显示：`when: { var, op, value }`，`op` 支持 `== != < <= > >= 含 不含 为空 非空`。
 - 旧写法（`widgets` / `type` / `bind` / `action` / `items[].onClick: "step"`）继续兼容。
 
-完整约定见 `docs/`：`P1-骨架计划.md`、`P2-完成记录.md`、`P3P4-完成记录.md`、`决策记录.md`。
+完整约定见 `docs/`：`使用说明.md`、`P1-骨架计划.md`、`P2-完成记录.md`、`P3P4-完成记录.md`、`决策记录.md`。
 
 ## 开发
 
 纯静态、无构建、无第三方依赖（浏览器侧）：
 
 ```
-node tests/run.mjs     # 91 条断言，纯 Node + 自制 DOM 桩
+node tests/run.mjs     # 97 条断言，纯 Node + 自制 DOM 桩
 ```
 
 目录：
@@ -83,9 +86,10 @@ src/validate.js     校验（网格、动作、页面、引用）
 src/plan.js         声明 + 变量 → 渲染数据（纯函数）
 src/store.js        localStorage（布局库 v2、界面状态、作用域选中）
 src/share.js        导出/导入
-src/panel.js        抽屉、页签、表单编辑器、拖动条
+src/panel.js        抽屉、页签、表单编辑器、拖动条、内嵌帮助
 style.css           全部样式，前缀 dshui-
 ui/sample-layout.js 内置示例（两页）
+ui/help.js          内嵌使用说明正文
 tests/              Node 测试（dom-stub / fake-ilb）
 ```
 

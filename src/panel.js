@@ -24,6 +24,7 @@ import { buildPlan, findPage, formatValue } from './plan.js';
 import { createStore, scopeKey } from './store.js';
 import {
   ILB_TABS,
+  KIND_LABELS,
   KINDS,
   MAX_PAGES,
   normalizeCell,
@@ -34,8 +35,9 @@ import { formatIssues, validateLayout } from './validate.js';
 import { exportText, fileNameFor, importText } from './share.js';
 import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './placement.js';
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
+import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -103,6 +105,7 @@ export function init(options = {}) {
     purgeArmed: false,
     editorHeight: Number(store.loadUi().editorHeight) || 0, // 0 = 用 CSS 默认
     handleY: Number(store.loadUi().handleY) || 0, // 0 = 用默认位置（视口 62%）
+    help: false, // true = 面板里显示使用说明
   };
   let cancelWait = null;
 
@@ -137,6 +140,11 @@ export function init(options = {}) {
   const build = el('span', 'dshui-build');
   build.textContent = `v${VERSION}`;
   build.title = '扩展版本；如果这里不是最新版本，强制刷新（Ctrl+Shift+R）';
+  const helpBtn = el('button', 'dshui-head-btn');
+  helpBtn.setAttribute('type', 'button');
+  helpBtn.setAttribute('title', '使用说明');
+  helpBtn.setAttribute('aria-label', '使用说明');
+  helpBtn.textContent = '?';
   const editBtn = el('button', 'dshui-head-btn');
   editBtn.setAttribute('type', 'button');
   editBtn.setAttribute('title', '编辑布局');
@@ -147,7 +155,7 @@ export function init(options = {}) {
   closeBtn.setAttribute('title', '收起');
   closeBtn.setAttribute('aria-label', '收起');
   closeBtn.textContent = '×';
-  head.append(dot, title, build, editBtn, closeBtn);
+  head.append(dot, title, build, helpBtn, editBtn, closeBtn);
 
   const status = el('div', 'dshui-status');
 
@@ -245,7 +253,11 @@ export function init(options = {}) {
   footMore.hidden = true;
   foot.append(footText, footMore);
 
-  panel.append(head, status, toolbar, body, foot);
+  // 使用说明：和正文互斥显示（面板里没有路由，直接切换可见性）
+  const helpBox = el('div', 'dshui-help');
+  helpBox.style.display = 'none';
+
+  panel.append(head, status, toolbar, body, foot, helpBox);
   root.append(fab, panel);
   doc.body.append(root);
 
@@ -414,9 +426,61 @@ export function init(options = {}) {
   }
 
   // ---------- 渲染 ----------
+  /** 使用说明只画一次（内容静态）。 */
+  function renderHelp() {
+    if (helpBox.firstChild) return;
+    for (const sec of HELP_SECTIONS) {
+      const block = el('section', 'dshui-help-sec');
+      const heading = el('h3', 'dshui-help-title');
+      heading.textContent = sec.title;
+      block.append(heading);
+      if (sec.text) {
+        const p = el('p', 'dshui-help-text');
+        p.textContent = sec.text;
+        block.append(p);
+      }
+      if (sec.bullets) {
+        const ul = el('ul', 'dshui-help-list');
+        for (const item of sec.bullets) {
+          const li = el('li');
+          li.textContent = item;
+          ul.append(li);
+        }
+        block.append(ul);
+      }
+      if (sec.code) {
+        const pre = el('pre', 'dshui-help-code');
+        pre.textContent = sec.code;
+        block.append(pre);
+      }
+      if (sec.note) {
+        const note = el('p', 'dshui-help-note');
+        note.textContent = sec.note;
+        block.append(note);
+      }
+      helpBox.append(block);
+    }
+  }
+
+  function applyHelpUi() {
+    const help = state.help === true;
+    if (help) renderHelp();
+    // 用 style.display 而不是 hidden：这些节点自己有 display:flex，[hidden] 会被 CSS 盖掉
+    helpBox.style.display = help ? '' : 'none';
+    status.style.display = help ? 'none' : '';
+    toolbar.style.display = help ? 'none' : '';
+    body.style.display = help ? 'none' : '';
+    foot.style.display = help ? 'none' : '';
+    editBtn.style.display = help ? 'none' : '';
+    helpBtn.textContent = help ? '返回' : '?';
+    helpBtn.setAttribute('title', help ? '返回界面' : '使用说明');
+    helpBtn.setAttribute('aria-label', help ? '返回界面' : '使用说明');
+  }
+
   function render() {
     try {
-      renderBody();
+      applyHelpUi();
+      if (state.help !== true) renderBody();
     } catch (err) {
       reportRenderError(err);
     }
@@ -789,7 +853,7 @@ export function init(options = {}) {
       const row = el('div', 'dshui-form-cell');
       const pick = el('button', 'dshui-small-btn dshui-form-cell-pick');
       pick.setAttribute('type', 'button');
-      pick.textContent = `${i + 1}. ${cell.kind}${cell.label ? ` · ${cell.label}` : cell.var ? ` · ${cell.var}` : ''}`;
+      pick.textContent = `${i + 1}. ${KIND_LABELS[cell.kind] ?? cell.kind}${cell.label ? ` · ${cell.label}` : cell.var ? ` · ${cell.var}` : ''}`;
       if (i === state.form.cellIndex) pick.classList.add('is-active');
       pick.addEventListener('click', () => {
         state.form.cellIndex = i;
@@ -811,7 +875,7 @@ export function init(options = {}) {
     formBox.append(list);
 
     const addKind = selectInput(
-      KINDS.map((k) => [k, k]),
+      KINDS.map((k) => [k, KIND_LABELS[k] ?? k]),
       'stat',
       () => {},
       { ariaLabel: '新增控件类型' },
@@ -821,7 +885,7 @@ export function init(options = {}) {
       const kind = addKind.value || 'stat';
       page.cells.push(
         normalizeCell(
-          { kind, label: kind === 'text' ? '' : `新${kind}`, var: ['stat', 'number', 'bar', 'toggle'].includes(kind) ? '金币' : null, area: [0, 0, 1, 1] },
+          { kind, label: kind === 'text' ? '' : `新${KIND_LABELS[kind] ?? kind}`, var: ['stat', 'number', 'bar', 'toggle'].includes(kind) ? '金币' : null, area: [0, 0, 1, 1] },
           page.cells.length,
         ),
       );
@@ -853,7 +917,7 @@ export function init(options = {}) {
     box.append(idLine);
 
     box.append(field('类型', selectInput(
-      KINDS.map((k) => [k, k]),
+      KINDS.map((k) => [k, KIND_LABELS[k] ?? k]),
       cell.kind,
       (v) => {
         cell.kind = v;
@@ -1325,6 +1389,10 @@ export function init(options = {}) {
   closeBtn.addEventListener('click', () => {
     state.open = false;
     applyOpen();
+  });
+  helpBtn.addEventListener('click', () => {
+    state.help = state.help !== true;
+    render();
   });
   editBtn.addEventListener('click', () => {
     if (state.editing) {

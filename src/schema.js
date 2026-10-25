@@ -29,6 +29,17 @@ export const KIND_DEFAULT = 'stat';
 /** 真正渲染的控件。未知控件报 warning 并降级成 stat 的样子。 */
 export const KINDS = Object.freeze(['stat', 'text', 'button', 'number', 'bar', 'toggle', 'list']);
 
+/** 界面里显示的中文名。存进 JSON 的仍然是 KINDS 里的英文 key。 */
+export const KIND_LABELS = Object.freeze({
+  stat: '状态',
+  text: '文本',
+  button: '按钮',
+  number: '数字',
+  bar: '条形',
+  toggle: '开关',
+  list: '列表',
+});
+
 /** 兼容旧名字。 */
 export const KINDS_P1 = KINDS;
 
