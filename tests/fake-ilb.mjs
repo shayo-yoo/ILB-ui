@@ -84,9 +84,15 @@ export function makeFakeIlb(options = {}) {
       const withUi = (res) => {
         if (!v12) return res;
         res.durationMs = options.durationMs ?? 41;
+        // ILB 0.14.1 起 call 的返回值带顶层 id / name（seq 分桶用）
+        if (options.resId) res.id = options.resId;
         // 只有传了 ui 才有这个键；v1.2 契约里没产出时是 null。v 是协议版本，由假 ILB 补。
         const raw = options.uiFor ? options.uiFor(name) : null;
         res.ui = raw ? { v: 1, ...raw } : null;
+        if (options.uiSkipped) {
+          res.uiSkipped =
+            typeof options.uiSkipped === 'function' ? options.uiSkipped(name) : options.uiSkipped;
+        }
         return res;
       };
       if (name === '抽卡' || name === 'B1::L::1') {
@@ -166,5 +172,5 @@ export function makeFakeIlb(options = {}) {
   }
   if (version === '1.2' && !api.caps.includes('ui')) api.caps.push('ui');
 
-  return { api, vars, state, listeners, emit };
+  return { api, vars, state, listeners, emit, options };
 }

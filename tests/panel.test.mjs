@@ -1152,4 +1152,242 @@ await checkAsync('v1.2：状态行显示 ui 能力', async () => {
   ui.destroy();
 });
 
+await checkAsync('v1.2：给了 page 就在那一页找 select，找不到只提示、不翻第二页', async () => {
+  const twoPages = {
+    title: '两页',
+    grid: { cols: 2, rows: 1 },
+    pages: [
+      {
+        id: 'main',
+        title: '主界面',
+        grid: { cols: 2, rows: 1 },
+        cells: [
+          { id: 'go', kind: 'button', label: '去背包', area: [0, 0, 1, 1], onClick: { kind: 'call', logic: '抽卡' } },
+        ],
+      },
+      {
+        id: 'bag',
+        title: '背包',
+        grid: { cols: 2, rows: 1 },
+        cells: [
+          { id: 'bag0', kind: 'text', label: '空的', area: [0, 0, 1, 1] },
+          { id: 'back', kind: 'button', label: '返回', area: [1, 0, 1, 1], onClick: { kind: 'open', page: 'main' } },
+        ],
+      },
+      {
+        id: 'third',
+        title: '第三页',
+        grid: { cols: 2, rows: 1 },
+        cells: [{ id: 'far', kind: 'text', label: '远处', area: [0, 0, 1, 1] }],
+      },
+    ],
+  };
+  // select 指到第三页的控件，但逻辑写的是 page: 'bag'
+  const { doc, storage } = v12Env(() => ({ seq: 1, page: 'bag', select: 'far' }));
+  const ui = initPanel(doc, storage, { sample: twoPages });
+  findButtonByText(doc.body, '去背包').click();
+  await sleep(10);
+  const chip = pageChip(doc).textContent;
+  assert.ok(chip.includes('背包'), `page 该赢，实际 ${chip}`);
+  assert.ok(!chip.includes('第三页'), `不能翻第二页，实际 ${chip}`);
+  const foot = findByClass(doc.body, 'dshui-foot').textContent;
+  assert.ok(foot.includes('不在'), `要提示找不到控件，实际 ${foot}`);
+  assert.equal(findAllByClass(doc.body, 'dshui-cell').filter((n) => n.classList.contains('is-picked')).length, 0);
+  ui.destroy();
+});
+
+await checkAsync('v1.2：seq 按 call 返回的 id 分桶（同名逻辑不串台）', async () => {
+  let resId = 'B1::L::1';
+  const { doc, storage, fake } = makeEnv({
+    ilb: { version: '1.2', resId, uiFor: () => ({ seq: 1, toast: '来了' }) },
+  });
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(findByClass(doc.body, 'dshui-foot').textContent.includes('来了'));
+
+  // 同一 seq，但换了一条逻辑（id 不同）→ 新桶，仍然执行
+  fake.options.resId = 'B2::L::1';
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(
+    findByClass(doc.body, 'dshui-foot').textContent.includes('来了'),
+    `换一条逻辑后同 seq 也该执行，实际 ${findByClass(doc.body, 'dshui-foot').textContent}`,
+  );
+  ui.destroy();
+});
+
+await checkAsync('v1.2：被忽略的界面指令要显示出来（uiSkipped）', async () => {
+  const { doc, storage } = makeEnv({
+    ilb: {
+      version: '1.2',
+      uiFor: () => null,
+      uiSkipped: () => [{ reason: '只有用户点按钮调用时才执行' }],
+    },
+  });
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  const foot = findByClass(doc.body, 'dshui-foot').textContent;
+  assert.ok(foot.includes('界面指令被忽略'), `要说明被忽略，实际 ${foot}`);
+  ui.destroy();
+});
+
+// ---------- 布局库（0.11.0） ----------
+
+function libEnv(extra = {}) {
+  const one = (id, title) => ({
+    id,
+    title,
+    scope: 'global',
+    avatar: '',
+    updatedAt: 1700000000000,
+    layout: { schema: 'dshui/1', id, title, grid: { cols: 4, rows: 2 }, cells: [{ id: `${id}-c`, kind: 'text', label: title, area: [0, 0, 2, 1] }] },
+  });
+  return makeEnv({
+    storage: { 'dshui.layouts.v2': JSON.stringify([one('a', '甲布局'), one('b', '乙布局')]) },
+    ...extra,
+  });
+}
+
+function libItems(doc) {
+  return findAllByClass(doc.body, 'dshui-lib-item');
+}
+
+function itemNamed(doc, title) {
+  return libItems(doc).find((row) => findByClass(row, 'dshui-lib-name')?.textContent === title) ?? null;
+}
+
+function miniIn(row, text) {
+  return findAll(row, (n) => n.tagName === 'button' && n.textContent === text)[0] ?? null;
+}
+
+check('布局库：点「库」换成库屏，正文让位，列出已存布局', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  assert.equal(findByClass(doc.body, 'dshui-body').style.display, 'none', '库屏时正文让位');
+  assert.notEqual(findByClass(doc.body, 'dshui-lib').style.display, 'none', '库屏可见');
+  assert.equal(libItems(doc).length, 2, `应列出 2 条，实际 ${libItems(doc).length}`);
+  assert.ok(findByClass(doc.body, 'dshui-lib-count').textContent.includes('2'), '顶部显示条数');
+  // 元信息：页数 / 控件数
+  assert.ok(findByClass(libItems(doc)[0], 'dshui-lib-meta').textContent.includes('1 控件'));
+
+  buttonByExactText(doc, '返回界面').click();
+  assert.notEqual(findByClass(doc.body, 'dshui-body').style.display, 'none', '返回后正文回来');
+  ui.destroy();
+});
+
+check('布局库：改名写回存储并重绘', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  miniIn(itemNamed(doc, '甲布局'), '改名').click();
+  const input = findByClass(doc.body, 'dshui-lib-rename');
+  assert.ok(input, '出现改名输入框');
+  input.value = '甲布局 2.0';
+  buttonByExactText(doc, '保存').click();
+
+  assert.equal(findByClass(doc.body, 'dshui-lib-rename'), null, '保存后输入框收起');
+  assert.ok(itemNamed(doc, '甲布局 2.0'), '列表里是新名字');
+  assert.ok(storage.getItem('dshui.layouts.v2').includes('甲布局 2.0'), '存储里也改了');
+  ui.destroy();
+});
+
+check('布局库：复制出的新条目 id 不同、标题带副本', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  miniIn(itemNamed(doc, '甲布局'), '复制').click();
+  assert.equal(libItems(doc).length, 3, '多出一条');
+  const copy = itemNamed(doc, '甲布局 副本');
+  assert.ok(copy, '出现「甲布局 副本」');
+  assert.notEqual(copy.dataset.id, 'a', '副本不能顶掉原件的 id');
+  assert.ok(itemNamed(doc, '甲布局'), '原件还在');
+  ui.destroy();
+});
+
+check('布局库：↑↓ 调顺序并写回', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  const order = () => JSON.parse(storage.getItem('dshui.layouts.v2')).map((x) => x.id);
+  assert.deepEqual(order(), ['a', 'b'], '初始顺序');
+
+  miniIn(itemNamed(doc, '乙布局'), '↑').click();
+  assert.deepEqual(order(), ['b', 'a'], '乙上移到第一位');
+  const saved = JSON.parse(storage.getItem('dshui.layouts.v2')).map((x) => x.id);
+  assert.deepEqual(saved, ['b', 'a'], '存储顺序也换了');
+  // 已经是第一条，↑ 应该置灰（没有处理器）
+  assert.ok(miniIn(itemNamed(doc, '乙布局'), '↑').classList.contains('is-off'), '第一条的 ↑ 不可用');
+  ui.destroy();
+});
+
+check('布局库：删除要点两次，第二次才真删', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  miniIn(itemNamed(doc, '乙布局'), '删除').click();
+  assert.equal(libItems(doc).length, 2, '第一次只是举手，不删');
+  const armed = miniIn(itemNamed(doc, '乙布局'), '确认删除');
+  assert.ok(armed, '按钮变成「确认删除」');
+  armed.click();
+  assert.equal(libItems(doc).length, 1, '第二次真删');
+  assert.equal(itemNamed(doc, '乙布局'), null);
+  assert.ok(!storage.getItem('dshui.layouts.v2').includes('乙布局'), '存储里也没了');
+  ui.destroy();
+});
+
+check('布局库：点名字应用该布局，下拉跟着变', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+
+  findByClass(itemNamed(doc, '乙布局'), 'dshui-lib-name').click();
+  assert.notEqual(findByClass(doc.body, 'dshui-body').style.display, 'none', '应用后回到正文');
+  assert.equal(findByClass(doc.body, 'dshui-layout-select').value, 'b', '下拉选中乙布局');
+  assert.ok(findByClass(doc.body, 'dshui-foot').textContent.includes('乙布局'));
+  ui.destroy();
+});
+
+check('布局库：＋新建 存一个空布局并直接应用', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+  buttonByExactText(doc, '＋ 新建').click();
+
+  const list = JSON.parse(storage.getItem('dshui.layouts.v2'));
+  assert.equal(list.length, 3, '库里多一条');
+  const made = list.find((x) => x.title === '新布局');
+  assert.ok(made, '标题是「新布局」');
+  assert.equal(made.layout.cells.length, 1, '新布局只有一个标题格');
+  assert.notEqual(findByClass(doc.body, 'dshui-body').style.display, 'none', '新建后直接进正文');
+  assert.equal(findByClass(doc.body, 'dshui-layout-select').value, made.id);
+  ui.destroy();
+});
+
+check('布局库：打开说明会关掉库，两者不叠', () => {
+  const { doc, storage } = libEnv();
+  const ui = initPanel(doc, storage);
+  ui.open();
+  buttonByExactText(doc, '库').click();
+  findAllByClass(doc.body, 'dshui-head-btn').find((n) => n.textContent === '?').click();
+
+  assert.notEqual(findByClass(doc.body, 'dshui-help').style.display, 'none', '说明可见');
+  assert.equal(findByClass(doc.body, 'dshui-lib').style.display, 'none', '库让位');
+  ui.destroy();
+});
+
 console.log(`panel.test: ${n} passed`);

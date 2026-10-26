@@ -42,7 +42,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.10.0';
+export const VERSION = '0.11.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -120,6 +120,10 @@ export function init(options = {}) {
     pickedId: '',
     ask: null,
     uiSeq: {}, // 每个逻辑最近消费过的 seq，用来丢弃重放
+    // 布局库：lib 是"整屏换成库"，libRename 是正在改名的那条，libDeleteArm 是点了删除等确认的那条
+    lib: false,
+    libRename: '',
+    libDeleteArm: '',
     vpHeight: null,
     peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
     // 页面 / 变量默认收成两条细 chip（D-U36）：只在点开时弹浮层，不占内容高度。
@@ -192,9 +196,14 @@ export function init(options = {}) {
   const toolbar = el('div', 'dshui-toolbar');
   const layoutSelect = el('select', 'dshui-layout-select');
   layoutSelect.setAttribute('aria-label', '选择布局');
+  const libBtn = el('button', 'dshui-lib-btn');
+  libBtn.setAttribute('type', 'button');
+  libBtn.textContent = '库';
+  libBtn.setAttribute('title', '布局库：改名 / 复制 / 排序 / 删除');
+  libBtn.setAttribute('aria-label', '布局库：改名 / 复制 / 排序 / 删除');
   const scopeTag = el('span', 'dshui-scope-tag');
   scopeTag.textContent = '';
-  toolbar.append(layoutSelect, scopeTag);
+  toolbar.append(layoutSelect, libBtn, scopeTag);
 
   const tools = el('div', 'dshui-tools');
 
@@ -327,6 +336,23 @@ export function init(options = {}) {
   const helpBox = el('div', 'dshui-help');
   helpBox.style.display = 'none';
 
+  // 布局库：另一屏，用来改名 / 复制 / 排序 / 删除（下拉只能切，管不了这些）
+  const libBox = el('div', 'dshui-lib');
+  libBox.style.display = 'none';
+  const libHead = el('div', 'dshui-lib-head');
+  const libTitle = el('span', 'dshui-lib-title');
+  libTitle.textContent = '布局库';
+  const libCount = el('span', 'dshui-lib-count');
+  const libNew = el('button', 'dshui-small-btn dshui-lib-new');
+  libNew.setAttribute('type', 'button');
+  libNew.textContent = '＋ 新建';
+  const libBack = el('button', 'dshui-small-btn');
+  libBack.setAttribute('type', 'button');
+  libBack.textContent = '返回界面';
+  libHead.append(libTitle, libCount, libNew, libBack);
+  const libList = el('div', 'dshui-lib-list');
+  libBox.append(libHead, libList);
+
   // 「只提示不阻塞」的浮条（v1.2 ui.ask）：贴在正文底部，点掉就消失，不拦任何操作
   const askBox = el('div', 'dshui-ask');
   askBox.hidden = true;
@@ -352,7 +378,7 @@ export function init(options = {}) {
   liveBox.setAttribute('aria-atomic', 'true');
   state.lastLive = '';
 
-  panel.append(head, status, toolbar, body, askBox, previewLayer, foot, helpBox, liveBox);
+  panel.append(head, status, toolbar, body, askBox, previewLayer, foot, helpBox, libBox, liveBox);
   root.append(fab, panel);
   doc.body.append(root);
 
@@ -660,26 +686,275 @@ export function init(options = {}) {
     }
   }
 
+  // ---------- 布局库（改名 / 复制 / 排序 / 删除） ----------
+
+  function fmtDay(ms) {
+    const d = new Date(Number(ms) || 0);
+    if (!Number.isFinite(d.getTime()) || !ms) return '—';
+    const p = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  function libMeta(entry) {
+    const l = entry.layout ?? {};
+    const pages = Array.isArray(l.pages) && l.pages.length ? l.pages : null;
+    const pageCount = pages ? pages.length : 1;
+    const cells = pages
+      ? pages.reduce((sum, p) => sum + (Array.isArray(p.cells) ? p.cells.length : 0), 0)
+      : Array.isArray(l.cells)
+        ? l.cells.length
+        : 0;
+    return `${pageCount} 页 · ${cells} 控件 · ${fmtDay(entry.updatedAt)}`;
+  }
+
+  function badge(text, cls) {
+    const b = el('span', 'dshui-lib-badge');
+    if (cls) b.classList.add(cls);
+    b.textContent = text;
+    return b;
+  }
+
+  function miniBtn(text, onClick, enabled = true, title = '') {
+    const b = el('button', 'dshui-mini-btn');
+    b.setAttribute('type', 'button');
+    b.textContent = text;
+    if (title) {
+      b.setAttribute('title', title);
+      b.setAttribute('aria-label', title);
+    }
+    if (enabled && typeof onClick === 'function') b.addEventListener('click', onClick);
+    else b.classList.add('is-off');
+    return b;
+  }
+
+  function renderLibrary() {
+    clear(libList);
+    const entries = store.loadLibrary();
+    libCount.textContent = entries.length ? `${entries.length} 个` : '';
+    const key = activeScopeKey();
+    const currentId = store.getSelectedId(key) ?? store.getSelectedId('global') ?? '';
+    const dead = new Set(orphansOf(entries));
+
+    if (!entries.length) {
+      const empty = el('div', 'dshui-lib-empty');
+      empty.textContent = '还没存过布局。点上面的「＋ 新建」建一个空的，或者回主界面把当前这个存进库。';
+      libList.append(empty);
+      return;
+    }
+
+    entries.forEach((entry, i) => {
+      libList.append(libRow(entry, i, entries.length, currentId, dead.has(entry)));
+    });
+  }
+
+  function libRow(entry, i, total, currentId, dead) {
+    const row = el('div', 'dshui-lib-item');
+    row.dataset.id = entry.id;
+    if (entry.id === currentId) row.classList.add('is-current');
+    if (dead) row.classList.add('is-dead');
+    if (state.libDeleteArm === entry.id) row.classList.add('is-arming');
+
+    const head = el('div', 'dshui-lib-row1');
+    if (state.libRename === entry.id) {
+      const input = el('input', 'dshui-lib-rename');
+      input.setAttribute('type', 'text');
+      input.setAttribute('aria-label', '新标题');
+      input.value = entry.title || '';
+      const save = miniBtn('保存', () => renameLayout(entry, input.value));
+      save.classList.add('dshui-small-btn');
+      const cancel = miniBtn('取消', () => {
+        state.libRename = '';
+        render();
+      });
+      cancel.classList.add('dshui-small-btn');
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') renameLayout(entry, input.value);
+        else if (ev.key === 'Escape') {
+          state.libRename = '';
+          render();
+        }
+      });
+      head.append(input, save, cancel);
+    } else {
+      const name = el('button', 'dshui-lib-name');
+      name.setAttribute('type', 'button');
+      name.setAttribute('title', '点一下用这个布局');
+      name.textContent = entry.title || entry.id;
+      name.addEventListener('click', () => selectLayout(entry.id));
+      head.append(name);
+      if (entry.id === currentId) head.append(badge('当前', 'is-now'));
+      head.append(badge(entry.scope === 'character' ? '角色卡' : '全局', entry.scope === 'character' ? 'is-char' : ''));
+      if (dead) head.append(badge('失效', 'is-dead'));
+    }
+    row.append(head);
+
+    const meta = el('div', 'dshui-lib-meta');
+    meta.textContent = libMeta(entry);
+    row.append(meta);
+
+    if (state.libRename !== entry.id) {
+      const acts = el('div', 'dshui-lib-acts');
+      acts.append(
+        miniBtn('应用', () => selectLayout(entry.id), entry.id !== currentId, '设成当前布局'),
+        miniBtn(
+          '改名',
+          () => {
+            state.libRename = entry.id;
+            state.libDeleteArm = '';
+            render();
+          },
+          true,
+          '改标题',
+        ),
+        miniBtn('复制', () => duplicateLibraryEntry(entry), true, '复制成新布局'),
+        miniBtn('↑', () => moveLayout(entry, -1), i > 0, '上移'),
+        miniBtn('↓', () => moveLayout(entry, 1), i < total - 1, '下移'),
+      );
+      const armed = state.libDeleteArm === entry.id;
+      const del = miniBtn(armed ? '确认删除' : '删除', () => deleteLayoutEntry(entry), true, armed ? '再点一次就删掉，不可撤销' : '删除这个布局');
+      del.classList.add('is-danger');
+      if (armed) del.classList.add('is-armed');
+      acts.append(del);
+      row.append(acts);
+    }
+    return row;
+  }
+
+  /** 把某条设成当前布局（等同原来的下拉选择）。 */
+  function selectLayout(id) {
+    state.draft = null;
+    state.editing = false;
+    state.preview = 'off';
+    cancelPress();
+    state.pageId = null;
+    state.pickedId = '';
+    state.lib = false;
+    state.libRename = '';
+    state.libDeleteArm = '';
+    store.setSelectedId(id || null, activeScopeKey());
+    if (!id) store.setSelectedId(null, 'global');
+    const entry = id ? store.getLayout(id) : null;
+    setMsg('ok', entry ? `布局：${entry.title || entry.id}` : '布局：示例');
+    render();
+  }
+
+  function renameLayout(entry, raw) {
+    const title = String(raw ?? '').trim();
+    if (!title) {
+      setMsg('bad', '标题不能为空');
+      render();
+      return;
+    }
+    if (title === (entry.title || '')) {
+      state.libRename = '';
+      render();
+      return;
+    }
+    store.saveLayout({
+      ...(entry.layout ?? {}),
+      id: entry.id,
+      title,
+      scope: entry.scope,
+      avatar: entry.avatar,
+    });
+    state.libRename = '';
+    setMsg('ok', `已改名为「${title}」`);
+    render();
+  }
+
+  /** 复制库里某一条（不碰草稿，也不切当前布局）。名字别叫 duplicateLayout：那是编辑器里的"草稿成新布局"。 */
+  function duplicateLibraryEntry(entry) {
+    const copy = cloneJson(entry.layout ?? {});
+    delete copy.id; // 留着会覆盖原件
+    copy.title = `${entry.title || '布局'} 副本`;
+    copy.scope = entry.scope;
+    copy.avatar = entry.avatar;
+    const saved = store.saveLayout(copy);
+    setMsg('ok', `已复制为「${saved.title}」`);
+    render();
+  }
+
+  function moveLayout(entry, delta) {
+    const list = store.loadLibrary();
+    const i = list.findIndex((x) => x.id === entry.id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    const [moved] = list.splice(i, 1);
+    list.splice(j, 0, moved);
+    store.saveLibrary(list);
+    setMsg('ok', `「${entry.title || entry.id}」已${delta < 0 ? '上移' : '下移'}`);
+    render();
+  }
+
+  /** 删除要两步：第一次只是"举手"，第二次才真删（没有撤销）。 */
+  function deleteLayoutEntry(entry) {
+    const name = entry.title || entry.id;
+    if (state.libDeleteArm !== entry.id) {
+      state.libDeleteArm = entry.id;
+      setMsg('warn', `再点一次「确认删除」才会删掉「${name}」`);
+      render();
+      return;
+    }
+    store.deleteLayout(entry.id);
+    const key = activeScopeKey();
+    if (store.getSelectedId(key) === entry.id) store.setSelectedId(null, key);
+    if (store.getSelectedId('global') === entry.id) store.setSelectedId(null, 'global');
+    state.libDeleteArm = '';
+    state.pageId = null;
+    setMsg('ok', `已删除「${name}」`);
+    render();
+  }
+
+  function newBlankLayout() {
+    const layout = {
+      schema: SCHEMA_ID,
+      title: '新布局',
+      grid: { cols: 4, rows: 2 },
+      cells: [{ id: 'title', kind: 'text', label: '新布局', area: [0, 0, 4, 1] }],
+    };
+    const avatar = getAvatar();
+    const onChar = activeScopeKey().startsWith('char:') && avatar;
+    layout.scope = onChar ? 'character' : 'global';
+    layout.avatar = onChar ? avatar : '';
+    const saved = store.saveLayout(layout);
+    state.lib = false;
+    state.libRename = '';
+    state.libDeleteArm = '';
+    selectLayout(saved.id);
+  }
+
+  /** 当前占着整屏的是谁：'' 正文 / 'help' 使用说明 / 'lib' 布局库。三者互斥。 */
+  function sheetMode() {
+    if (state.help === true) return 'help';
+    if (state.lib === true) return 'lib';
+    return '';
+  }
+
   function applyHelpUi() {
-    const help = state.help === true;
-    if (help) renderHelp();
+    const mode = sheetMode();
+    if (mode === 'help') renderHelp();
+    if (mode === 'lib') renderLibrary();
+    const hide = mode !== '';
     // 用 style.display 而不是 hidden：这些节点自己有 display:flex，[hidden] 会被 CSS 盖掉
-    helpBox.style.display = help ? '' : 'none';
-    status.style.display = help ? 'none' : '';
-    toolbar.style.display = help ? 'none' : '';
-    body.style.display = help ? 'none' : '';
-    previewLayer.hidden = help || state.preview === 'off';
-    foot.style.display = help ? 'none' : '';
-    editBtn.style.display = help ? 'none' : '';
-    helpBtn.textContent = help ? '返回' : '?';
-    helpBtn.setAttribute('title', help ? '返回界面' : '使用说明');
-    helpBtn.setAttribute('aria-label', help ? '返回界面' : '使用说明');
+    helpBox.style.display = mode === 'help' ? '' : 'none';
+    libBox.style.display = mode === 'lib' ? '' : 'none';
+    status.style.display = hide ? 'none' : '';
+    toolbar.style.display = hide ? 'none' : '';
+    body.style.display = hide ? 'none' : '';
+    previewLayer.hidden = hide || state.preview === 'off';
+    foot.style.display = hide ? 'none' : '';
+    editBtn.style.display = hide ? 'none' : '';
+    helpBtn.textContent = mode === 'help' ? '返回' : '?';
+    helpBtn.setAttribute('title', mode === 'help' ? '返回界面' : '使用说明');
+    helpBtn.setAttribute('aria-label', mode === 'help' ? '返回界面' : '使用说明');
+    libBtn.classList.toggle('is-on', mode === 'lib');
   }
 
   function render() {
     try {
       applyHelpUi();
-      if (state.help !== true) renderBody();
+      if (sheetMode() === '') renderBody();
+      else renderFoot(); // 说明/库屏也要能看到回执，否则改名、删除的结果无处显示
     } catch (err) {
       reportRenderError(err);
     }
@@ -1760,13 +2035,16 @@ export function init(options = {}) {
       if (extra.length) parts.push(extra.join(' · '));
       if (Number.isFinite(res.durationMs)) parts.push(`${Math.round(res.durationMs)}ms`);
       if (cmd) {
-        const done = applyUiCommand(cmd, action.logic);
+        const done = applyUiCommand(cmd, res.id || res.name || action.logic);
         if (done.toast) parts.unshift(done.toast);
         setMsg(tone === 'ok' ? 'ok' : 'warn', parts.length ? `已执行 · ${parts.join(' · ')}` : '已执行逻辑');
         render();
         applyUiFocus(done);
         return;
       }
+      // 没有可执行指令，但逻辑其实想过要动界面（比如被消息触发路径拦下）——说出来，别静默
+      const skippedText = skippedUiText(res);
+      if (skippedText) parts.push(skippedText);
       setMsg(tone === 'ok' ? 'ok' : 'warn', parts.length ? `已执行 · ${parts.join(' · ')}` : '已执行逻辑');
       render();
       return;
@@ -1786,16 +2064,19 @@ export function init(options = {}) {
 
   /**
    * 消费一条 v1.2 界面指令。**只认 v1.2 那几个键**，不做任何求值。
-   * 返回 { toast, pageTarget, picked }，真正的滚动/高亮在 render 之后做。
+   * 返回 { toast, pageTarget, picked, ask }，真正的滚动/高亮在 render 之后做。
+   *
+   * `bucketKey` 是 seq 的桶键：优先用返回值顶层的 `id`（跨书同名时唯一），
+   * 退化到逻辑名——ILB 0.14.1 起 `call` 会带 `id`，见 D-U45。
    */
-  function applyUiCommand(ui, logicName) {
-    const done = { toast: '', pageTarget: null, picked: null };
+  function applyUiCommand(ui, bucketKey) {
+    const done = { toast: '', pageTarget: null, picked: null, ask: null };
     // seq 去重：只在变大时执行（ILB 侧要求"每次调用只消费一次"）
     const seq = Number(ui.seq);
     if (Number.isFinite(seq) && seq >= 0) {
-      const last = state.uiSeq[logicName];
+      const last = state.uiSeq[bucketKey];
       if (typeof last === 'number' && seq <= last) return done;
-      state.uiSeq[logicName] = seq;
+      state.uiSeq[bucketKey] = seq;
     }
     if (typeof ui.toast === 'string' && ui.toast.trim()) {
       done.toast = clip(ui.toast.trim(), 80);
@@ -1814,8 +2095,32 @@ export function init(options = {}) {
       }
     }
     if (typeof ui.select === 'string' && ui.select) done.picked = clip(ui.select, 64);
+    // ILB 0.14.1 §1.1：给了 page 就只在这一页上找 select，找不到只提示、**不翻第二页**
+    // —— 翻页必须由写书的人在逻辑里显式写 page。没给 page 时才允许自动翻过去兜底。
+    if (done.pageTarget && done.picked) {
+      const onPage = (done.pageTarget.cells ?? []).some((c) => c.id === done.picked);
+      if (!onPage) {
+        const where = done.pageTarget.title || ui.page;
+        done.toast = done.toast || `要聚焦的控件不在「${where}」这一页里`;
+        done.picked = null;
+      }
+    }
     if (ui.ask && typeof ui.ask === 'object') done.ask = normalizeAsk(ui.ask);
     return done;
+  }
+
+  /**
+   * ILB 会把"想发但没发出去的界面指令"记进 `uiSkipped`（例如只由消息触发）。
+   * 形状我们不去猜死：优先读 `.reason`，退化成字符串化，只取第一条、截短。
+   */
+  function skippedUiText(res) {
+    const list = Array.isArray(res.uiSkipped) ? res.uiSkipped : [];
+    if (!list.length) return '';
+    const first = list[0];
+    const reason =
+      first && typeof first === 'object' ? (first.reason ?? first.why ?? '') : String(first ?? '');
+    const text = String(reason).trim();
+    return text ? `界面指令被忽略：${clip(text, 40)}` : '界面指令被忽略';
   }
 
   function normalizeAsk(ask) {
@@ -1976,8 +2281,31 @@ export function init(options = {}) {
       cancelPress();
     }
     state.help = state.help !== true;
+    if (state.help) state.lib = false;
+    if (state.libRename || state.libDeleteArm) {
+      state.libRename = '';
+      state.libDeleteArm = '';
+    }
     render();
   });
+  libBtn.addEventListener('click', () => {
+    if (state.preview !== 'off') {
+      state.preview = 'off';
+      cancelPress();
+    }
+    state.lib = state.lib !== true;
+    if (state.lib) state.help = false;
+    state.libRename = '';
+    state.libDeleteArm = '';
+    render();
+  });
+  libBack.addEventListener('click', () => {
+    state.lib = false;
+    state.libRename = '';
+    state.libDeleteArm = '';
+    render();
+  });
+  libNew.addEventListener('click', newBlankLayout);
   editBtn.addEventListener('click', () => {
     if (state.editing) {
       state.editing = false;
