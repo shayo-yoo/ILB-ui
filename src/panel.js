@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.6.0';
+export const VERSION = '0.7.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -135,6 +135,7 @@ export function init(options = {}) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'ILBUI');
+  panel.setAttribute('tabindex', '-1');
 
   const head = el('header', 'dshui-head');
   const dot = el('span', 'dshui-dot');
@@ -274,7 +275,15 @@ export function init(options = {}) {
   const helpBox = el('div', 'dshui-help');
   helpBox.style.display = 'none';
 
-  panel.append(head, status, toolbar, body, foot, helpBox);
+  // 读屏播报区：只在值真的变了的时候写一句话，避免每次 render 都刷屏
+  const liveBox = el('div', 'dshui-sr-only');
+  liveBox.id = 'dshui-live';
+  liveBox.setAttribute('role', 'status');
+  liveBox.setAttribute('aria-live', 'polite');
+  liveBox.setAttribute('aria-atomic', 'true');
+  state.lastLive = '';
+
+  panel.append(head, status, toolbar, body, foot, helpBox, liveBox);
   root.append(fab, panel, previewLayer);
   doc.body.append(root);
 
@@ -350,13 +359,45 @@ export function init(options = {}) {
     else setTimeout(run, 16);
   }
 
-  function applyOpen(save = true) {
+  function applyOpen(save = true, moveFocus = true) {
+    const wasOpen = panel.hidden === false;
     panel.hidden = !state.open;
     fab.setAttribute('aria-expanded', state.open ? 'true' : 'false');
     if (state.open) fab.classList.add('is-open');
     else fab.classList.remove('is-open');
     positionHandle();
     if (save) store.saveUi({ open: state.open, handleY: state.handleY });
+    // 焦点跟着走：开抽屉后键盘能直接操作，关抽屉后焦点回到把手，不丢在地里
+    if (!moveFocus) return;
+    if (state.open && !wasOpen) focusFirst();
+    else if (!state.open && wasOpen) focusFab();
+  }
+
+  /** 抽屉里第一个能聚焦的控件；都找不到就聚焦面板本身。 */
+  function focusFirst() {
+    const first = collectFocusable(panel)[0];
+    if (first) first.focus();
+    else if (typeof panel.focus === 'function') panel.focus();
+  }
+
+  /** 自己走树收集可聚焦元素：不依赖 querySelectorAll，测试桩里也能跑。 */
+  function collectFocusable(node, out = []) {
+    if (!node || node.hidden) return out;
+    const tag = String(node.tagName || '').toLowerCase();
+    const native = tag === 'button' || tag === 'select' || tag === 'input' || tag === 'textarea';
+    if (native && !node.disabled && node.getAttribute?.('tabindex') !== '-1') out.push(node);
+    for (const child of node.children || []) collectFocusable(child, out);
+    return out;
+  }
+
+  function focusFab() {
+    if (typeof fab.focus === 'function') fab.focus();
+  }
+
+  function closePanel() {
+    if (!state.open) return;
+    state.open = false;
+    applyOpen();
   }
 
   // ---------- 侧边把手 ----------
@@ -408,6 +449,15 @@ export function init(options = {}) {
 
   function setMsg(tone, text) {
     state.msg = text ? { tone, text } : null;
+    announce(text);
+  }
+
+  /** 读屏播报：同一句话不重复念（否则每次 render 都会刷屏）。 */
+  function announce(text) {
+    const next = text ? String(text) : '';
+    if (!next || next === state.lastLive) return;
+    state.lastLive = next;
+    liveBox.textContent = next;
   }
 
   // ---------- 当前布局与作用域 ----------
@@ -684,6 +734,8 @@ export function init(options = {}) {
   function renderGrid(plan, gridBox = gridBoxRef) {
     clear(gridBox);
     gridBox.style.display = 'grid';
+    gridBox.setAttribute('role', 'group');
+    gridBox.setAttribute('aria-label', `页面：${plan.page.title || plan.page.id}`);
     gridBox.style.gridTemplateColumns = `repeat(${plan.grid.cols}, minmax(${plan.grid.minCellWidth}px, 1fr))`;
     gridBox.style.gridAutoRows = `minmax(${plan.grid.minCellHeight}px, auto)`;
     gridBox.style.gap = `${plan.grid.gap}px`;
@@ -738,6 +790,14 @@ export function init(options = {}) {
     const text = el('span', 'dshui-cell-text dshui-bar-value');
     text.textContent = cell.text;
     const track = el('span', 'dshui-bar-track');
+    // 读屏语义：进度条告诉辅助技术「现在是多少 / 上限多少」，光靠宽度看不出
+    const ratio = cell.ratio ?? 0;
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', '100');
+    track.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+    track.setAttribute('aria-valuetext', cell.text);
+    track.setAttribute('aria-label', cell.label || '进度');
     const fill = el('span', 'dshui-bar-fill');
     fill.style.width = `${Math.round((cell.ratio ?? 0) * 100)}%`;
     track.append(fill);
@@ -1534,12 +1594,15 @@ export function init(options = {}) {
     state.preview = 'off';
     render();
   });
-  // Esc 退出预览（在面板任意位置按）
+  // Esc：先退预览，再关抽屉（键盘用户的常规预期）
   panel.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape') return;
-    if (state.preview === 'off') return;
-    state.preview = 'off';
-    render();
+    if (state.preview !== 'off') {
+      state.preview = 'off';
+      render();
+      return;
+    }
+    closePanel();
   });
 
   /** 切换表单/JSON：先无条件把界面切过去，再做解析与重绘，避免解析/渲染出错时卡在旧页签。 */
@@ -1632,7 +1695,8 @@ export function init(options = {}) {
   });
 
   // ---------- 启动 ----------
-  applyOpen(false);
+  // 首屏恢复「上次是打开的」不算用户操作，不抢焦点
+  applyOpen(false, false);
   render();
 
   // ILB 可能比我们晚加载：听 ilb:ready + 轮询兜底，就绪后补订阅、重画。

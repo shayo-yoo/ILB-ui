@@ -958,3 +958,77 @@ button.dshui-chip:hover {
 .dshui-preview-btn.is-active {
   background: rgba(122, 162, 255, 0.18);
 }
+/* ---------- P5：无障碍（焦点可见 / 触控目标 / 减少动效） ---------- */
+
+/* 只给读屏的文本：视觉隐藏，朗读可见 */
+.dshui-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 键盘焦点环：面板内所有可交互元素统一，鼠标点击不触发 */
+.dshui-root :is(button, select, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--dshui-accent);
+  outline-offset: 2px;
+}
+
+/* 格子本身就是按钮，焦点环贴边，少占位置 */
+.dshui-cell:focus-visible {
+  outline-offset: 1px;
+}
+
+/* 触控目标基线：WCAG 2.2 AA 要求 24×24，这里统一取 28px 留余量 */
+.dshui-head-btn,
+.dshui-close,
+.dshui-layout-select,
+.dshui-page-tab,
+.dshui-chip,
+.dshui-list-item,
+.dshui-small-btn,
+.dshui-mode-btn {
+  min-height: 28px;
+}
+
+.dshui-head-btn,
+.dshui-close {
+  min-width: 28px;
+}
+
+/* 粗指针（触摸屏）或窄视口：抬到 44px（Apple HIG / WCAG AAA 建议值）。
+   两个条件都要：真机上 pointer:coarse 会命中，桌面把窗口拉窄时靠宽度兜底。 */
+@media (pointer: coarse), (max-width: 640px) {
+  .dshui-head-btn,
+  .dshui-close,
+  .dshui-layout-select,
+  .dshui-page-tab,
+  .dshui-chip,
+  .dshui-list-item,
+  .dshui-small-btn,
+  .dshui-mode-btn {
+    min-height: 44px;
+  }
+
+  .dshui-head-btn,
+  .dshui-close {
+    min-width: 44px;
+  }
+}
+
+/* 系统开启“减少动态效果”时关掉过渡与动画 */
+@media (prefers-reduced-motion: reduce) {
+  .dshui-root,
+  .dshui-root * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

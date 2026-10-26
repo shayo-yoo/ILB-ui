@@ -68,6 +68,7 @@ class El {
       if (node === null || node === undefined) continue;
       const child = typeof node === 'string' ? new El('#text').withText(node) : node;
       child.parent = this;
+      if (this.doc) child.doc = this.doc;
       this.children.push(child);
     }
     return this;
@@ -119,6 +120,30 @@ class El {
     return this;
   }
 
+  /** 是否是 this 的后代（含自身）。 */
+  contains(node) {
+    let n = node;
+    while (n) {
+      if (n === this) return true;
+      n = n.parent;
+    }
+    return false;
+  }
+
+  /** 聚焦：把所在 document 的 activeElement 指过来，够断言“焦点去哪了”。 */
+  focus() {
+    this.focused = true;
+    let n = this;
+    while (n) {
+      if (n.doc) {
+        if (n.doc.activeElement && n.doc.activeElement !== this) n.doc.activeElement.focused = false;
+        n.doc.activeElement = this;
+        return;
+      }
+      n = n.parent;
+    }
+  }
+
   /** 派发一次任意事件（测试用）。props 会合进事件对象。 */
   dispatch(type, props = {}) {
     const list = [...(this.listeners.get(type) ?? [])];
@@ -145,8 +170,11 @@ class El {
 }
 
 export function createDocument() {
+  const body = new El('body');
   const doc = {
-    body: new El('body'),
+    body,
+    // 焦点从 body 起步：断言「打开后焦点离开 body」需要一个起点
+    activeElement: body,
     createElement: (tag) => new El(tag),
     createTextNode: (text) => new El('#text').withText(String(text)),
     // 全局监听（拖动条/预览按钮松手时用）；测试里手动派发
@@ -165,6 +193,7 @@ export function createDocument() {
       for (const fn of [...(this.listeners.get(type) ?? [])]) fn({ type, preventDefault() {}, ...props });
     },
   };
+  body.doc = doc;
   return doc;
 }
 

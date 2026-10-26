@@ -635,4 +635,88 @@ check('missing：没有 ILB 也不崩，给出提示', () => {
   ui.destroy();
 });
 
+check('无障碍：进度条带 progressbar 语义与数值', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const track = findByClass(doc.body, 'dshui-bar-track');
+  assert.ok(track, '示例布局里有进度条');
+  assert.equal(track.getAttribute('role'), 'progressbar');
+  assert.equal(track.getAttribute('aria-valuemin'), '0');
+  assert.equal(track.getAttribute('aria-valuemax'), '100');
+  assert.match(track.getAttribute('aria-valuenow'), /^\d+$/);
+  assert.ok(track.getAttribute('aria-label'), '进度条有名字');
+  assert.ok(track.getAttribute('aria-valuetext'), '数值外还有可读文本');
+  ui.destroy();
+});
+
+check('无障碍：网格是带页面名的 group', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const grid = findByClass(doc.body, 'dshui-grid');
+  assert.equal(grid.getAttribute('role'), 'group');
+  assert.ok(grid.getAttribute('aria-label').startsWith('页面：'), grid.getAttribute('aria-label'));
+  ui.destroy();
+});
+
+check('无障碍：动作结果写进 aria-live，同一句不重复刷', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const live = findByClass(doc.body, 'dshui-sr-only');
+  assert.ok(live, '有播报区');
+  assert.equal(live.getAttribute('aria-live'), 'polite');
+  assert.equal(live.textContent, '', '初始静默，不打扰');
+
+  buttonByExactText(doc, '金币 +1').click();
+  const first = live.textContent;
+  assert.ok(first.includes('金币'), `播报了金币变化：${first}`);
+
+  // 再点一次：值变了，播报要更新
+  buttonByExactText(doc, '金币 +1').click();
+  assert.notEqual(live.textContent, first, '值变化要重新播报');
+  ui.destroy();
+});
+
+check('无障碍：Esc 先退预览，再关抽屉', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const fab = findByClass(doc.body, 'dshui-fab');
+  const panel = findByClass(doc.body, 'dshui-panel');
+
+  fab.click();
+  assert.equal(panel.hidden, false, '抽屉打开');
+
+  // 没有预览时，Esc 直接关抽屉
+  panel.dispatch('keydown', { key: 'Escape' });
+  assert.equal(panel.hidden, true, 'Esc 关掉了抽屉');
+
+  // 有预览时，Esc 只退预览，抽屉留着
+  fab.click();
+  assert.equal(panel.hidden, false, '抽屉重新打开');
+  buttonByExactText(doc, '编辑').click();
+  const layer = findByClass(doc.body, 'dshui-preview');
+  findByClass(doc.body, 'dshui-preview-btn').click();
+  assert.equal(layer.hidden, false);
+  panel.dispatch('keydown', { key: 'Escape' });
+  assert.equal(layer.hidden, true, 'Esc 退了预览');
+  assert.equal(panel.hidden, false, '抽屉还在');
+  ui.destroy();
+});
+
+check('无障碍：开抽屉焦点进面板，关抽屉焦点回把手', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const fab = findByClass(doc.body, 'dshui-fab');
+  const panel = findByClass(doc.body, 'dshui-panel');
+
+  fab.click();
+  assert.equal(panel.hidden, false);
+  assert.ok(panel.contains(doc.activeElement), '焦点落进面板内部');
+  assert.notEqual(doc.activeElement, doc.body, '焦点没留在 body');
+
+  findByClass(doc.body, 'dshui-close').click();
+  assert.equal(panel.hidden, true);
+  assert.equal(doc.activeElement, fab, '焦点回到把手，不丢');
+  ui.destroy();
+});
+
 console.log(`panel.test: ${n} passed`);
