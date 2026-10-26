@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.8.0';
+export const VERSION = '0.8.1';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -100,6 +100,7 @@ export function init(options = {}) {
     draft: null, // 编辑中但还没保存的布局
     pageId: null,
     form: { pageIndex: 0, cellIndex: 0 },
+    formKey: null, // 表单结构指纹；一样就不重建，避免打字时光标被踢回开头
     importOpen: false,
     importText: '',
     purgeArmed: false,
@@ -108,6 +109,8 @@ export function init(options = {}) {
     // 预览层：'off' 编辑态（整块编辑器）| 'peek' 长按临时预览 | 'live' 点按锁定交互。
     // 三种状态都发生在抽屉内部，不铺满视口（见 D-U26）。
     preview: 'off',
+    vpTop: null, // 最近一次按 visualViewport 算出来的 top/height；用来做抖动抑制
+    vpHeight: null,
     peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
   };
   let cancelWait = null;
@@ -118,7 +121,7 @@ export function init(options = {}) {
     if (cls) node.className = cls;
     return node;
   };
-  const win = doc.defaultView ?? globalThis;
+  const win = options.window ?? doc.defaultView ?? globalThis;
 
   // ---------- 结构 ----------
   const root = el('div', 'dshui-root');
@@ -245,7 +248,11 @@ export function init(options = {}) {
   importBox.append(importTextEl, importRow);
 
   const issueBox = el('div', 'dshui-issues');
-  editor.append(editorHint, modeRow, formBox, textarea, editorActions, importBox, issueBox);
+  // 滚动区只管「表单 / JSON / 导入」：动作条固定在编辑器底部，
+  // 手机上键盘弹出来时不会跟着内容一起被推到看不见的地方。
+  const editorScroll = el('div', 'dshui-editor-scroll');
+  editorScroll.append(formBox, textarea, importBox);
+  editor.append(editorHint, modeRow, editorScroll, issueBox, editorActions);
 
   // 预览层：**在抽屉里面**，占用正文那块地方——不铺满屏幕。
   // 编辑时这里放编辑器，预览时这里放实时网格，两者不共存，面板自己的
@@ -293,8 +300,9 @@ export function init(options = {}) {
     node.textContent = '';
   }
 
-  function button(text, onClick, cls = 'dshui-small-btn') {
-    const node = el('button', cls);
+  function button(text, onClick, cls = '') {
+    // 永远带上基础样式：只传 'dshui-icon-btn' 时别把按钮退回浏览器默认的白底
+    const node = el('button', `dshui-small-btn ${cls}`.trim());
     node.setAttribute('type', 'button');
     node.textContent = text;
     node.addEventListener('click', onClick);
@@ -391,6 +399,20 @@ export function init(options = {}) {
     return out;
   }
 
+  /** node 是不是 root 的后代（桩 DOM 只有 parent，真 DOM 用 parentNode）。 */
+  function inside(node, root) {
+    for (let n = node; n; n = n.parent || n.parentNode) if (n === root) return true;
+    return false;
+  }
+
+  /** 焦点是不是在某个输入框里——是的话就别重建表单/别覆盖它的值。 */
+  function isTypingInside(root) {
+    const active = doc.activeElement;
+    if (!active || !inside(active, root)) return false;
+    const tag = String(active.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea';
+  }
+
   function focusFab() {
     if (typeof fab.focus === 'function') fab.focus();
   }
@@ -426,6 +448,7 @@ export function init(options = {}) {
 
   function positionHandle() {
     if (state.disposed) return;
+    applyViewport();
     const maxTop = handleMaxTop();
     let y = clampHandleY(state.handleY || Math.round((win.innerHeight || 800) * 0.62), {
       top: HANDLE.edge,
@@ -445,6 +468,51 @@ export function init(options = {}) {
     } else {
       fab.style.left = 'auto';
       fab.style.right = '';
+    }
+  }
+
+  /**
+   * 手机键盘：visualViewport 描述「真正看得见的那块」，比 100vh / 100dvh 靠谱。
+   * 键盘弹起来时把抽屉的 top / height 收到可视区内，否则抽屉下半截
+   * （校验结果 + 动作条）会被键盘顶到屏幕外，看不见也点不到。
+   * 变化不足 32px 就不动，免得地址栏伸缩时抽屉一直抖。
+   */
+  function applyViewport() {
+    if (state.disposed) return;
+    const vv = win.visualViewport;
+    if (!vv) return;
+    if (!state.open) {
+      panel.style.top = '';
+      panel.style.height = '';
+      state.vpTop = null;
+      state.vpHeight = null;
+      return;
+    }
+    const top = Math.round((vv.offsetTop || 0) + 12);
+    const height = Math.max(240, Math.round((vv.height || win.innerHeight || 800) - 24));
+    if (
+      state.vpTop !== null &&
+      state.vpHeight !== null &&
+      Math.abs(state.vpTop - top) < 32 &&
+      Math.abs(state.vpHeight - height) < 32
+    ) {
+      return;
+    }
+    state.vpTop = top;
+    state.vpHeight = height;
+    panel.style.top = `${top}px`;
+    panel.style.height = `${height}px`;
+  }
+
+  /** 键盘弹起后把正在编辑的输入框滚回可视区。 */
+  function revealFocus() {
+    const active = doc.activeElement;
+    if (!active || !inside(active, panel)) return;
+    if (typeof active.scrollIntoView !== 'function') return;
+    try {
+      active.scrollIntoView({ block: 'nearest' });
+    } catch {
+      /* 老内核不接受参数对象就算了 */
     }
   }
 
@@ -734,7 +802,8 @@ export function init(options = {}) {
 
   function renderGrid(plan, gridBox = gridBoxRef) {
     clear(gridBox);
-    gridBox.style.display = 'grid';
+    // 这里**不能**写 inline display：编辑态要靠 .dshui-body.is-editing .dshui-grid 的
+    // display:none 让位，inline 样式优先级更高，会把编辑时的网格又顶出来（0.8.1 修）
     gridBox.setAttribute('role', 'group');
     gridBox.setAttribute('aria-label', `页面：${plan.page.title || plan.page.id}`);
     gridBox.style.gridTemplateColumns = `repeat(${plan.grid.cols}, minmax(${plan.grid.minCellWidth}px, 1fr))`;
@@ -845,6 +914,9 @@ export function init(options = {}) {
     editor.hidden = !fullEditor;
     editor.classList.toggle('is-open', fullEditor);
     body.classList.toggle('is-editing', fullEditor);
+    // 编辑态把状态行/布局下拉也收起来：只留标题栏 + 编辑器 + 动作条，
+    // 手机上每一像素都要留给输入框（0.8.1）
+    panel.classList.toggle('is-editing', fullEditor);
     editor.style.height = '';
     previewLayer.hidden = !previewing;
     // 预览时正文整块让位（不只是藏网格）：否则会看到「网格 + 编辑器」上下堆着
@@ -875,8 +947,22 @@ export function init(options = {}) {
     renderIssues();
   }
 
-  function renderForm() {
-    clear(formBox);
+  /**
+   * 结构指纹：只有「结构」变了才重建表单。
+   * 输入框里的字变了不算结构变化——重建会把输入节点整个换掉，
+   * 光标被扔回开头，打出来的字就成了倒序（手机上尤其明显）。
+   */
+  function formKey(layout, page, pageIndex) {
+    return [
+      pageIndex,
+      state.form.cellIndex,
+      page.id,
+      JSON.stringify(layout.grid ?? null),
+      page.cells.map((c) => `${c.id}:${c.kind}`).join('|'),
+    ].join('#');
+  }
+
+  function renderForm(force = false) {
     // 直接改草稿本体：normalizeLayout 会深拷贝，改副本等于白改（P3 回归）
     const layout = state.draft ?? normalizeLayout(currentLayout());
     if (!layout) return;
@@ -884,6 +970,15 @@ export function init(options = {}) {
     const pageIndex = Math.min(Math.max(0, state.form.pageIndex | 0), pages.length - 1);
     state.form.pageIndex = pageIndex;
     const page = pages[pageIndex];
+    const key = formKey(layout, page, pageIndex);
+    // 正在打字就绝不重建（结构动作都会把焦点移到按钮上，不会被这条挡住）；
+    // 结构指纹没变也不用重建
+    if (!force) {
+      if (isTypingInside(formBox)) return;
+      if (state.formKey === key) return;
+    }
+    state.formKey = key;
+    clear(formBox);
 
     formBox.append(field('标题', textInput(layout.title, (v) => {
       layout.title = v;
@@ -912,7 +1007,7 @@ export function init(options = {}) {
         (raw) => {
           state.form.pageIndex = Number(raw);
           state.form.cellIndex = 0;
-          renderForm();
+          renderForm(true);
         },
       )),
       button('＋ 页面', () => {
@@ -925,7 +1020,7 @@ export function init(options = {}) {
         state.form.pageIndex = pages.length - 1;
         state.form.cellIndex = 0;
         syncJson();
-        renderForm();
+        renderForm(true);
       }),
       button('删除页', () => {
         if (pages.length <= 1) return;
@@ -933,7 +1028,7 @@ export function init(options = {}) {
         state.form.pageIndex = Math.max(0, pageIndex - 1);
         state.form.cellIndex = 0;
         syncJson();
-        renderForm();
+        renderForm(true);
       }),
     );
     formBox.append(pagesRow);
@@ -956,7 +1051,7 @@ export function init(options = {}) {
       if (i === state.form.cellIndex) pick.classList.add('is-active');
       pick.addEventListener('click', () => {
         state.form.cellIndex = i;
-        renderForm();
+        renderForm(true);
       });
       row.append(pick);
       row.append(
@@ -966,7 +1061,7 @@ export function init(options = {}) {
           page.cells.splice(i, 1);
           state.form.cellIndex = Math.max(0, Math.min(state.form.cellIndex, page.cells.length - 1));
           syncJson();
-          renderForm();
+          renderForm(true);
         }, 'dshui-icon-btn dshui-danger-btn'),
       );
       list.append(row);
@@ -990,7 +1085,7 @@ export function init(options = {}) {
       );
       state.form.cellIndex = page.cells.length - 1;
       syncJson();
-      renderForm();
+      renderForm(true);
     }));
     formBox.append(addRow);
 
@@ -1005,7 +1100,7 @@ export function init(options = {}) {
     page.cells.splice(to, 0, cell);
     state.form.cellIndex = to;
     syncJson();
-    renderForm();
+    renderForm(true);
   }
 
   function renderCellForm(cell, page) {
@@ -1021,7 +1116,7 @@ export function init(options = {}) {
       (v) => {
         cell.kind = v;
         syncJson();
-        renderForm();
+        renderForm(true);
       },
     )));
 
@@ -1115,7 +1210,7 @@ export function init(options = {}) {
         else if (v === 'call') cell.onClick = { kind: 'call', logic: '', args: {} };
         else cell.onClick = { kind: 'open', page: '', tab: '' };
         syncJson();
-        renderForm();
+        renderForm(true);
       },
     )));
 
@@ -1361,6 +1456,7 @@ export function init(options = {}) {
     state.draft = result.layout;
     state.pageId = null;
     state.form = { pageIndex: 0, cellIndex: 0 };
+    state.formKey = null;
     state.editing = true;
     state.mode = 'form';
     state.importOpen = false;
@@ -1509,6 +1605,7 @@ export function init(options = {}) {
     state.preview = 'off';
     state.draft = normalizeLayout(currentLayout());
     state.form = { pageIndex: currentPageIndex(), cellIndex: 0 };
+    state.formKey = null;
     state.mode = 'form';
     state.issues = null;
     syncJson();
@@ -1605,6 +1702,8 @@ export function init(options = {}) {
   /** 切换表单/JSON：先无条件把界面切过去，再做解析与重绘，避免解析/渲染出错时卡在旧页签。 */
   function switchMode(mode) {
     state.mode = mode;
+    // 换页签一定重画表单：JSON 里可能改过值，结构指纹看不出这些变化
+    state.formKey = null;
     applyModeUi();
     try {
       if (mode === 'form' && state.editing) {
@@ -1641,6 +1740,7 @@ export function init(options = {}) {
   sampleBtn.addEventListener('click', () => {
     state.draft = normalizeLayout(sample);
     state.form = { pageIndex: 0, cellIndex: 0 };
+    state.formKey = null;
     state.pageId = null;
     state.issues = null;
     syncJson();
@@ -1706,6 +1806,26 @@ export function init(options = {}) {
     { interval: 500, timeout: 15000 },
   );
 
+  // ---------- 视口（手机键盘 / 横竖屏） ----------
+  const viewport = win.visualViewport;
+  let revealTimer = 0;
+  const onViewportResize = () => {
+    applyViewport();
+    positionHandle();
+    // 等收起键盘的动画走完再滚，否则算出来的位置是旧的
+    clearTimeout(revealTimer);
+    revealTimer = setTimeout(revealFocus, 120);
+  };
+  const onViewportScroll = () => {
+    applyViewport();
+    positionHandle();
+  };
+  if (viewport && typeof viewport.addEventListener === 'function') {
+    viewport.addEventListener('resize', onViewportResize);
+    viewport.addEventListener('scroll', onViewportScroll);
+  }
+  if (typeof win.addEventListener === 'function') win.addEventListener('resize', onViewportResize);
+
   const controller = {
     version: VERSION,
     open: () => {
@@ -1728,13 +1848,22 @@ export function init(options = {}) {
     },
     render,
     probe,
-    reposition: positionHandle,
+    reposition: () => {
+      applyViewport();
+      positionHandle();
+    },
     destroy,
     root,
   };
 
   function destroy() {
     state.disposed = true;
+    clearTimeout(revealTimer);
+    if (viewport && typeof viewport.removeEventListener === 'function') {
+      viewport.removeEventListener('resize', onViewportResize);
+      viewport.removeEventListener('scroll', onViewportScroll);
+    }
+    if (typeof win.removeEventListener === 'function') win.removeEventListener('resize', onViewportResize);
     if (state.unsub) {
       try {
         state.unsub();

@@ -300,6 +300,21 @@ button.dshui-chip:hover {
   min-height: 0;
 }
 
+/* 编辑态只留编辑相关的东西：状态行、布局下拉都收起来，高度全给输入框 */
+.dshui-panel.is-editing .dshui-status,
+.dshui-panel.is-editing .dshui-toolbar {
+  display: none;
+}
+
+/* 编辑器中间滚动、动作条钉在底部：手机键盘弹起来时“预览/校验/应用”还在原地 */
+.dshui-editor-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .dshui-cell {
   display: flex;
   flex-direction: column;
@@ -561,7 +576,7 @@ button.dshui-chip:hover {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 12px 0;
+  padding: 8px 12px;
 }
 
 .dshui-editor[hidden] {
@@ -594,6 +609,9 @@ button.dshui-chip:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 0 0 auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--dshui-line);
 }
 
 /* 抽屉只有 336px 宽时，“应用/保存（全局）”别被挤成竖排 */
@@ -603,8 +621,9 @@ button.dshui-chip:hover {
 }
 
 .dshui-issues {
-  max-height: 30vh;
+  max-height: 18vh;
   overflow: auto;
+  flex: 0 0 auto;
   font-size: 11px;
   line-height: 1.5;
 }

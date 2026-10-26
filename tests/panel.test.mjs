@@ -726,4 +726,108 @@ check('无障碍：开抽屉焦点进面板，关抽屉焦点回把手', () => {
   ui.destroy();
 });
 
+check('编辑态：状态行/布局下拉收起，正文网格不再占地方', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  const panel = findByClass(doc.body, 'dshui-panel');
+  const grid = findByClass(doc.body, 'dshui-grid');
+  assert.equal(grid.style.display, undefined, '网格不能写 inline display，否则 CSS 藏不掉');
+
+  buttonByExactText(doc, '编辑').click();
+  assert.ok(panel.classList.contains('is-editing'), '面板进编辑态');
+  assert.ok(findByClass(doc.body, 'dshui-body').classList.contains('is-editing'), '正文进编辑态');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, false, '编辑器出来');
+
+  buttonByExactText(doc, '收起编辑').click();
+  assert.equal(panel.classList.contains('is-editing'), false, '退出编辑态');
+  ui.destroy();
+});
+
+check('编辑器：动作条在滚动区外面，键盘弹起也点得到', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+  const editor = findByClass(doc.body, 'dshui-editor');
+  const scroll = findByClass(doc.body, 'dshui-editor-scroll');
+  const actions = findByClass(doc.body, 'dshui-editor-actions');
+  assert.ok(scroll.contains(findByClass(doc.body, 'dshui-form')), '表单在滚动区里');
+  assert.equal(scroll.contains(actions), false, '动作条不在滚动区里');
+  assert.equal(editor.children[editor.children.length - 1], actions, '动作条是编辑器最后一项');
+  ui.destroy();
+});
+
+check('编辑器：打字时重绘不重建输入框（光标不会被踢回开头）', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+  const pick = findAll(doc.body, (n) => n.classList.contains('dshui-form-cell-pick'))[0];
+  pick.click();
+  const labelField = findAll(
+    doc.body,
+    (n) => n.classList.contains('dshui-field') && n.textContent.startsWith('label'),
+  )[0];
+  const input = findAll(labelField, (n) => n.tagName === 'input')[0];
+  input.focus();
+  input.value = '金币';
+  input.dispatch('input');
+
+  ui.render();
+  const again = findAll(
+    findAll(doc.body, (n) => n.classList.contains('dshui-field') && n.textContent.startsWith('label'))[0],
+    (n) => n.tagName === 'input',
+  )[0];
+  assert.equal(again, input, '同一个输入节点，没被换掉');
+  assert.equal(doc.activeElement, input, '焦点还在输入框里');
+  assert.equal(again.value, '金币', '输入的内容还在');
+  ui.destroy();
+});
+
+check('编辑器：结构变了（加页面）照样重建表单', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+  const before = findAll(doc.body, (n) => n.classList.contains('dshui-form-cell')).length;
+  assert.ok(before > 0, '先有控件行');
+  buttonByExactText(doc, '＋ 页面').click();
+  const after = findAll(doc.body, (n) => n.classList.contains('dshui-form-cell')).length;
+  assert.equal(after, 0, '新页没有控件，列表跟着重画');
+  assert.ok(findByClass(doc.body, 'dshui-form').textContent.includes('控件 · 0'));
+  ui.destroy();
+});
+
+check('手机键盘：抽屉按 visualViewport 收缩，关抽屉还原', () => {
+  const { doc, storage } = makeEnv();
+  const listeners = new Map();
+  const vv = {
+    height: 500,
+    offsetTop: 0,
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    removeEventListener() {},
+  };
+  const fakeWin = {
+    innerHeight: 844,
+    visualViewport: vv,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const ui = initPanel(doc, storage, { window: fakeWin });
+  const panel = findByClass(doc.body, 'dshui-panel');
+  const fab = findByClass(doc.body, 'dshui-fab');
+
+  fab.click();
+  assert.equal(panel.style.top, '12px', '顶到可视区上沿');
+  assert.equal(panel.style.height, '476px', `高度跟可视区走，实际 ${panel.style.height}`);
+
+  // 键盘弹起来：可视区变矮，抽屉跟着缩
+  vv.height = 300;
+  listeners.get('resize')();
+  assert.equal(panel.style.height, '276px', '键盘弹起后动作条别被键盘挡住');
+
+  findByClass(doc.body, 'dshui-close').click();
+  assert.equal(panel.style.height, '', '关抽屉后交还给 CSS');
+  ui.destroy();
+});
+
 console.log(`panel.test: ${n} passed`);
