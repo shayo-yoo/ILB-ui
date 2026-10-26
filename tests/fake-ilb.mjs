@@ -31,7 +31,6 @@ export function makeFakeIlb(options = {}) {
   const api = {
     version,
     caps: options.caps ?? (version === '1.0' ? [] : [...CAPS_11]),
-
     snapshot() {
       return {
         version,
@@ -81,22 +80,47 @@ export function makeFakeIlb(options = {}) {
 
     call(name, args = {}, opts = {}) {
       state.calls.push([name, args, opts]);
+      const v12 = version === '1.2';
+      const withUi = (res) => {
+        if (!v12) return res;
+        res.durationMs = options.durationMs ?? 41;
+        // 只有传了 ui 才有这个键；v1.2 契约里没产出时是 null。v 是协议版本，由假 ILB 补。
+        const raw = options.uiFor ? options.uiFor(name) : null;
+        res.ui = raw ? { v: 1, ...raw } : null;
+        return res;
+      };
       if (name === '抽卡' || name === 'B1::L::1') {
         vars['结果'] = 'SSR';
         emit('call', { name, ok: true });
-        return {
+        return withUi({
           ok: true,
           outcome: 'ok',
           ran: true,
           passed: true,
           reason: '',
           writes: { 结果: 'SSR' },
+          extra: ['你抽到了 SSR'],
+          steps: [],
+          vars: { ...vars },
+          unusedArgs: [],
+          missingParams: [],
+        });
+      }
+      if (name === '旧格式') {
+        // 早期写法：extra 是对象而不是 string[]，extraList 要能吃掉
+        return withUi({
+          ok: true,
+          outcome: 'ok',
+          ran: true,
+          passed: true,
+          reason: '',
+          writes: {},
           extra: { 卡: 'SSR' },
           steps: [],
           vars: { ...vars },
           unusedArgs: [],
           missingParams: [],
-        };
+        });
       }
       if (name === '同名') {
         return {
@@ -117,8 +141,7 @@ export function makeFakeIlb(options = {}) {
       return { ok: false, outcome: 'error', ran: false, passed: false, reason: '没有对应的逻辑' };
     },
 
-    subscribe(fn) {
-      if (typeof fn !== 'function') {
+    subscribe(fn) {      if (typeof fn !== 'function') {
         console.warn('[ILB] subscribe 需要一个函数');
         return () => {};
       }
@@ -133,6 +156,15 @@ export function makeFakeIlb(options = {}) {
       close() {},
     },
   };
+
+  // v1.2 才有的异步入口：默认给一个"下一微任务才回来"的版本，测试可以靠它验证"执行中"。
+  if (version === '1.2' && options.callAsync !== false) {
+    api.callAsync = (name, args = {}, opts = {}) =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(api.call(name, args, opts)), options.delayMs ?? 0);
+      });
+  }
+  if (version === '1.2' && !api.caps.includes('ui')) api.caps.push('ui');
 
   return { api, vars, state, listeners, emit };
 }

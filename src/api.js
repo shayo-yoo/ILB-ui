@@ -139,11 +139,38 @@ export function callLogic(name, args, opts) {
   }
 }
 
+/** v1.2 才有：调用前能让出一帧，界面可以先画「执行中…」。 */
+export function hasCallAsync(api = getApi()) {
+  return Boolean(api && typeof api.callAsync === 'function');
+}
+
+/**
+ * 跑一条逻辑，尽量用 v1.2 的 callAsync（先让出一帧，按钮可以先置灰）。
+ * 返回 Promise，**从不抛异常**：失败也是 resolve，看 outcome。
+ * @param {string} name 逻辑名或 id
+ * @param {object} [args] 键是参数名
+ * @param {{nonce?:string, text?:string, strict?:boolean}} [opts]
+ */
+export async function callLogicAsync(name, args, opts) {
+  const api = getApi();
+  if (!api) return { ok: false, outcome: 'error', reason: 'ILB 未加载' };
+  if (typeof name !== 'string' || !name) return { ok: false, outcome: 'error', reason: '逻辑名为空' };
+  if (!hasCallAsync(api)) return callLogic(name, args, opts);
+  try {
+    const res = await api.callAsync(name, args ?? {}, opts ?? {});
+    return res && typeof res === 'object'
+      ? res
+      : { ok: false, outcome: 'error', reason: '接口无返回' };
+  } catch (err) {
+    console.warn('[dsh-ui] callAsync 抛异常', err);
+    return { ok: false, outcome: 'error', reason: String(err?.message ?? err) };
+  }
+}
+
 /**
  * 结果的语气：ok / blocked（业务拒绝，黄） / error（真错，红）。
  * 旧版没有 outcome：只能二分。
- */
-export function outcomeOf(res) {
+ */export function outcomeOf(res) {
   if (!res || typeof res !== 'object') return 'error';
   if (res.outcome === 'ok' || res.outcome === 'blocked' || res.outcome === 'error') return res.outcome;
   return res.ok ? 'ok' : 'error';
@@ -152,6 +179,36 @@ export function outcomeOf(res) {
 /** 同名逻辑的候选列表（v1.1 才有）。 */
 export function candidatesOf(res) {
   return Array.isArray(res?.candidates) ? res.candidates : [];
+}
+
+/**
+ * `extra` 归一化成字符串数组。
+ * v1.1 契约里 extra 是 `string[]`（本次产生的正文）；早期写法里出现过单个字符串
+ * 或 `{键:值}` 对象，这里一并吃掉，免得调用方到处判类型。
+ */
+export function extraList(extra) {
+  if (extra == null) return [];
+  if (typeof extra === 'string') return extra ? [extra] : [];
+  if (Array.isArray(extra)) {
+    return extra.map((x) => (typeof x === 'string' ? x : String(x))).filter((x) => x !== '');
+  }
+  if (typeof extra === 'object') {
+    return Object.entries(extra).map(([k, v]) => `${k}：${v === null || v === undefined ? '—' : String(v)}`);
+  }
+  return [String(extra)];
+}
+
+/**
+ * v1.2 的界面指令：拿不到能力位、或版本不对，一律当没有。
+ * 这里只做「形状」判断，不解释语义（解释在 panel 里）。
+ * @returns {object|null}
+ */
+export function uiCommandOf(res) {
+  if (!hasCap('ui')) return null;
+  const ui = res?.ui;
+  if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return null;
+  if (ui.v !== 1) return null;
+  return ui;
 }
 
 /** 打开 ILB 自带面板（v1.1）。失败返回 false，不抛。 */

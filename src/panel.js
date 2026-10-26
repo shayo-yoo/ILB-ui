@@ -8,8 +8,12 @@
 import {
   addVar,
   callLogic,
+  callLogicAsync,
   candidatesOf,
   countsOf,
+  extraList,
+  hasCallAsync,
+  hasCap,
   openIlbPanel,
   outcomeOf,
   probe,
@@ -17,6 +21,7 @@ import {
   setVar,
   subscribe,
   toggleVar,
+  uiCommandOf,
   varsOf,
   waitForApi,
 } from './api.js';
@@ -37,7 +42,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.9.0';
+export const VERSION = '0.10.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -110,6 +115,11 @@ export function init(options = {}) {
     // 三种状态都发生在抽屉内部，不铺满视口（见 D-U26）。
     preview: 'off',
     vpTop: null, // 最近一次按 visualViewport 算出来的 top/height；用来做抖动抑制
+    // v1.2 界面指令：busy 防叠加调用，picked 高亮哪个控件，ask 是那条不阻塞的提示
+    busy: false,
+    pickedId: '',
+    ask: null,
+    uiSeq: {}, // 每个逻辑最近消费过的 seq，用来丢弃重放
     vpHeight: null,
     peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
     // 页面 / 变量默认收成两条细 chip（D-U36）：只在点开时弹浮层，不占内容高度。
@@ -118,6 +128,11 @@ export function init(options = {}) {
       vars: store.loadUi().varsOpen === true,
     },
     flashPage: false, // 动作切页后让 chip 闪一下，否则用户以为点错了
+    // v1.2 界面指令：pickedId 是要高亮的控件（null = 没有），ask 是「只提示不阻塞」的浮条
+    pickedId: null,
+    ask: null,
+    busy: false, // callAsync 进行中：按钮置灰，防连点
+    uiSeq: {}, // 每条逻辑各记一个 seq 水位，只在变大时执行（ILB 侧要求的一次性消费）
   };
   let cancelWait = null;
   let pressTimer = null; // 长按计时器
@@ -312,6 +327,23 @@ export function init(options = {}) {
   const helpBox = el('div', 'dshui-help');
   helpBox.style.display = 'none';
 
+  // 「只提示不阻塞」的浮条（v1.2 ui.ask）：贴在正文底部，点掉就消失，不拦任何操作
+  const askBox = el('div', 'dshui-ask');
+  askBox.hidden = true;
+  askBox.setAttribute('role', 'group');
+  askBox.setAttribute('aria-label', '逻辑提示');
+  const askTitle = el('div', 'dshui-ask-title');
+  const askText = el('div', 'dshui-ask-text');
+  const askOk = el('button', 'dshui-small-btn dshui-ask-ok');
+  askOk.setAttribute('type', 'button');
+  const askRow = el('div', 'dshui-ask-row');
+  askRow.append(askOk);
+  askBox.append(askTitle, askText, askRow);
+  askOk.addEventListener('click', () => {
+    state.ask = null;
+    renderAsk();
+  });
+
   // 读屏播报区：只在值真的变了的时候写一句话，避免每次 render 都刷屏
   const liveBox = el('div', 'dshui-sr-only');
   liveBox.id = 'dshui-live';
@@ -320,7 +352,7 @@ export function init(options = {}) {
   liveBox.setAttribute('aria-atomic', 'true');
   state.lastLive = '';
 
-  panel.append(head, status, toolbar, body, previewLayer, foot, helpBox, liveBox);
+  panel.append(head, status, toolbar, body, askBox, previewLayer, foot, helpBox, liveBox);
   root.append(fab, panel);
   doc.body.append(root);
 
@@ -709,7 +741,9 @@ export function init(options = {}) {
     if (p.state === 'legacy') {
       return `${p.reason} · 可用，但少 outcome/nonce 等新能力`;
     }
-    return `接口 v${p.version} · 书 ${counts.books} · 逻辑 ${counts.logics} · 变量 ${Object.keys(vars).length}`;
+    const base = `接口 v${p.version} · 书 ${counts.books} · 逻辑 ${counts.logics} · 变量 ${Object.keys(vars).length}`;
+    // v1.2 的 ui 能力单独标出来：能显示说明"逻辑可以指挥界面"这条通道通了
+    return hasCap('ui') ? `${base} · ui` : base;
   }
 
   function orphanEntries() {
@@ -904,6 +938,8 @@ export function init(options = {}) {
       const node = el(clickable ? 'button' : 'div', cls);
       if (clickable) node.setAttribute('type', 'button');
       if (cell.degraded) node.classList.add('is-degraded');
+      if (cell.id) node.dataset.cellId = cell.id;
+      if (state.pickedId && cell.id === state.pickedId) node.classList.add('is-picked');
       node.style.gridColumn = `${cell.area.c + 1} / span ${cell.area.cs}`;
       node.style.gridRow = `${cell.area.r + 1} / span ${cell.area.rs}`;
 
@@ -1661,7 +1697,7 @@ export function init(options = {}) {
     render();
   }
 
-  function runAction(action) {
+  async function runAction(action) {
     if (!action) return;
     let res;
     if (action.kind === 'set') res = setVar(action.var, action.value);
@@ -1674,11 +1710,7 @@ export function init(options = {}) {
         if (!target) {
           setMsg('bad', `没有页面「${action.page}」`);
         } else {
-          state.pageId = target.id;
-          setMsg('ok', `切到「${target.title}」`);
-          // 界面"自己翻页"时 chip 闪一下，顺带把页面浮层收起
-          state.metaOpen.pages = false;
-          flashPageChip();
+          switchPage(target, `切到「${target.title}」`);
           return;
         }
         render();
@@ -1692,7 +1724,20 @@ export function init(options = {}) {
       const opts = {};
       if (action.nonce) opts.nonce = action.nonce;
       if (action.text) opts.text = action.text;
-      res = callLogic(action.logic, action.args ?? {}, opts);
+      if (state.busy) return; // v1.2 异步调用还没回来，别叠加
+      if (hasCallAsync()) {
+        // 先画「执行中…」再让出：callAsync 自己会让一帧
+        state.busy = true;
+        setMsg('ok', `执行中…（${action.logic}）`);
+        renderFoot();
+        try {
+          res = await callLogicAsync(action.logic, action.args ?? {}, opts);
+        } finally {
+          state.busy = false;
+        }
+      } else {
+        res = callLogic(action.logic, action.args ?? {}, opts);
+      }
     } else {
       res = { ok: false, outcome: 'error', reason: `不认识的点击动作：${action.kind}` };
     }
@@ -1704,24 +1749,156 @@ export function init(options = {}) {
         ? ` · 候选：${candidates.map((c) => `${c.book}/${c.name}（${c.id}）`).join('、')}`
         : '';
       setMsg(tone === 'blocked' ? 'warn' : 'bad', `${res.reason || '操作没成功'}${hint}`);
-    } else if (action.kind === 'call') {
-      const extra = extraText(res.extra);
-      setMsg(tone === 'ok' ? 'ok' : 'warn', extra ? `已执行 · ${extra}` : '已执行逻辑');
-    } else {
-      setMsg('ok', `${action.var} → ${formatValue(res.value ?? readValue(action.var))}`);
+      render();
+      return;
     }
+    if (action.kind === 'call') {
+      // 「界面」步骤的指令先记账，等这一轮画完再落（见 applyUiCommand）
+      const cmd = uiCommandOf(res);
+      const parts = [];
+      const extra = extraList(res.extra);
+      if (extra.length) parts.push(extra.join(' · '));
+      if (Number.isFinite(res.durationMs)) parts.push(`${Math.round(res.durationMs)}ms`);
+      if (cmd) {
+        const done = applyUiCommand(cmd, action.logic);
+        if (done.toast) parts.unshift(done.toast);
+        setMsg(tone === 'ok' ? 'ok' : 'warn', parts.length ? `已执行 · ${parts.join(' · ')}` : '已执行逻辑');
+        render();
+        applyUiFocus(done);
+        return;
+      }
+      setMsg(tone === 'ok' ? 'ok' : 'warn', parts.length ? `已执行 · ${parts.join(' · ')}` : '已执行逻辑');
+      render();
+      return;
+    }
+    setMsg('ok', `${action.var} → ${formatValue(res.value ?? readValue(action.var))}`);
     render();
+  }
+
+  /** 切页统一入口：chip 闪一下 + 收起页面浮层，免得"界面自己翻页"看着像点错了。 */
+  function switchPage(target, text) {
+    state.pageId = target.id;
+    setMsg('ok', text);
+    state.metaOpen.pages = false;
+    flashPageChip();
+    render();
+  }
+
+  /**
+   * 消费一条 v1.2 界面指令。**只认 v1.2 那几个键**，不做任何求值。
+   * 返回 { toast, pageTarget, picked }，真正的滚动/高亮在 render 之后做。
+   */
+  function applyUiCommand(ui, logicName) {
+    const done = { toast: '', pageTarget: null, picked: null };
+    // seq 去重：只在变大时执行（ILB 侧要求"每次调用只消费一次"）
+    const seq = Number(ui.seq);
+    if (Number.isFinite(seq) && seq >= 0) {
+      const last = state.uiSeq[logicName];
+      if (typeof last === 'number' && seq <= last) return done;
+      state.uiSeq[logicName] = seq;
+    }
+    if (typeof ui.toast === 'string' && ui.toast.trim()) {
+      done.toast = clip(ui.toast.trim(), 80);
+    }
+    if (typeof ui.page === 'string' && ui.page) {
+      const layout = currentLayout();
+      const target = (layout.pages ?? []).find((p) => p.id === ui.page);
+      if (target) {
+        state.pageId = target.id;
+        state.metaOpen.pages = false;
+        flashPageChip();
+        done.pageTarget = target;
+      } else {
+        // 页面不存在：只提示，不报错（契约要求）
+        done.toast = done.toast || `逻辑要切到「${ui.page}」，但这个布局没有这一页`;
+      }
+    }
+    if (typeof ui.select === 'string' && ui.select) done.picked = clip(ui.select, 64);
+    if (ui.ask && typeof ui.ask === 'object') done.ask = normalizeAsk(ui.ask);
+    return done;
+  }
+
+  function normalizeAsk(ask) {
+    const title = clip(String(ask.title ?? '提示'), 40);
+    const text = clip(String(ask.text ?? ''), 120);
+    const ok = clip(String(ask.ok ?? '知道了'), 12);
+    return { title, text, ok };
+  }
+
+  /** 高亮 + 滚到看得见。必须在 render 之后调用（节点那时才存在）。 */
+  function applyUiFocus(done) {
+    if (done.picked) {
+      state.pickedId = done.picked;
+      // 选中的控件可能不在当前页：先翻到它所在的页，再找节点
+      const onCurrent = currentCells().some((c) => c.id === done.picked);
+      if (!onCurrent) {
+        const layout = currentLayout();
+        const target = (layout.pages ?? []).find((p) => (p.cells ?? []).some((c) => c.id === done.picked));
+        if (target && target.id !== state.pageId) {
+          state.pageId = target.id;
+          state.metaOpen.pages = false;
+          flashPageChip();
+        }
+      }
+      render();
+      const node = findCellNode(done.picked);
+      if (node) {
+        try {
+          node.scrollIntoView?.({ block: 'nearest' });
+        } catch {
+          /* 老浏览器没有参数对象就算了 */
+        }
+      }
+    }
+    if (done.ask) setAsk(done.ask);
+  }
+
+  function currentCells() {
+    const layout = currentLayout();
+    if (layout.pages && layout.pages.length) {
+      const page = layout.pages.find((p) => p.id === state.pageId) ?? layout.pages[0];
+      return page.cells ?? [];
+    }
+    return layout.cells ?? [];
+  }
+
+  function findCellNode(id) {
+    // 桩环境里没有 querySelectorAll，用 children 树自己走
+    const stack = [...gridBox.children];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node.dataset && node.dataset.cellId === id) return node;
+      if (node.children) stack.push(...node.children);
+    }
+    return null;
+  }
+
+  function setAsk(ask) {
+    state.ask = ask;
+    renderAsk();
+  }
+
+  /** ui.ask 的渲染：只是提示条，不拦操作、不阻塞后续逻辑（ILB 明确不做可挂起运行时）。 */
+  function renderAsk() {
+    const ask = state.ask;
+    if (!ask) {
+      askBox.hidden = true;
+      return;
+    }
+    askBox.hidden = false;
+    askTitle.textContent = ask.title;
+    askText.textContent = ask.text;
+    askText.hidden = !ask.text;
+    askOk.textContent = ask.ok;
+  }
+
+  function clip(text, max) {
+    const s = String(text);
+    return s.length > max ? `${s.slice(0, max - 1)}…` : s;
   }
 
   function readValue(name) {
     return varsOf(readSnapshot())[name];
-  }
-
-  function extraText(extra) {
-    if (!extra || typeof extra !== 'object') return '';
-    return Object.entries(extra)
-      .map(([k, v]) => `${k}：${formatValue(v)}`)
-      .join(' · ');
   }
 
   // ---------- 事件 ----------

@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import {
   addVar,
   callLogic,
+  callLogicAsync,
   candidatesOf,
   countsOf,
+  extraList,
+  hasCallAsync,
+  hasCap,
   openIlbPanel,
   outcomeOf,
   probe,
@@ -11,6 +15,7 @@ import {
   setVar,
   subscribe,
   toggleVar,
+  uiCommandOf,
   varsOf,
 } from '../src/api.js';
 import { makeFakeIlb } from './fake-ilb.mjs';
@@ -135,7 +140,7 @@ check('call：透传 ok / extra / outcome', () => {
     const res = callLogic('抽卡', {});
     assert.equal(res.ok, true);
     assert.equal(outcomeOf(res), 'ok');
-    assert.deepEqual(res.extra, { 卡: 'SSR' });
+    assert.deepEqual(res.extra, ['你抽到了 SSR']);
     assert.deepEqual(fake.state.calls[0][0], '抽卡');
   });
 });
@@ -203,5 +208,79 @@ check('subscribe：正常返回可用的退订', () => {
     assert.equal(hits, 1);
   });
 });
+
+/**
+ * v1.2：异步调用 + 界面指令 + extra 归一化。
+ */
+async function withIlbAsync(fn, options = {}) {
+  const fake = makeFakeIlb({ vars: { 金币: 3, 生命: 10, 心情: '平静', 灯: false }, ...options });
+  globalThis.ILB = { api: fake.api };
+  try {
+    await fn(fake);
+  } finally {
+    delete globalThis.ILB;
+  }
+}
+
+await (async () => {
+  await withIlbAsync((fake) => {
+    assert.equal(hasCallAsync(), true, 'v1.2 要有 callAsync');
+  }, { version: '1.2' });
+  await withIlbAsync(() => {
+    assert.equal(hasCallAsync(), false, 'v1.1 没有 callAsync');
+    assert.equal(hasCap('outcome'), true, 'v1.1 有 outcome');
+    assert.equal(hasCap('ui'), false, 'v1.1 没有 ui');
+  });
+  n += 1;
+  console.log('  ok hasCallAsync / hasCap 按版本与 caps 判断');
+
+  await withIlbAsync(async () => {
+    const res = await callLogicAsync('抽卡', {});
+    assert.equal(res.ok, true);
+    assert.equal(res.outcome, 'ok');
+    assert.equal(typeof res.durationMs, 'number');
+  }, { version: '1.2' });
+  await withIlbAsync(async () => {
+    const res = await callLogicAsync('抽卡', {});
+    assert.equal(res.ok, true, 'v1.1 要退回同步 call');
+  });
+  n += 1;
+  console.log('  ok callLogicAsync：v1.2 走 callAsync，老版本退回同步 call');
+
+  await withIlbAsync(async () => {
+    const res = await callLogicAsync('抽卡', {}, {});
+    assert.equal(res.ui.v, 1);
+    assert.equal(res.ui.toast, '好了');
+  }, { version: '1.2', uiFor: () => ({ toast: '好了' }) });
+  await withIlbAsync(async () => {
+    const res = await callLogicAsync('抽卡', {}, {});
+    assert.equal(res.ui, null, '没有产出 ui 时是 null');
+  }, { version: '1.2' });
+  n += 1;
+  console.log('  ok ui 指令：有则带 v，无则 null');
+
+  await withIlbAsync(() => {
+    assert.equal(uiCommandOf({ ui: { v: 1, toast: 'x' } }).toast, 'x');
+    assert.equal(uiCommandOf({ ui: { toast: 'x' } }), null, '缺 v 不认');
+    assert.equal(uiCommandOf({ ui: { v: 2 } }), null, '版本不认识就不认');
+    assert.equal(uiCommandOf({ ui: null }), null);
+    assert.equal(uiCommandOf({}), null);
+  }, { version: '1.2' });
+  await withIlbAsync(() => {
+    assert.equal(uiCommandOf({ ui: { v: 1, toast: 'x' } }), null, 'v1.1 没有 ui 能力位，一律当没有');
+  });
+  n += 1;
+  console.log('  ok uiCommandOf：只认 v=1，且必须先有 ui 能力位');
+
+  await withIlbAsync(() => {
+    assert.deepEqual(extraList(['a', 'b']), ['a', 'b']);
+    assert.deepEqual(extraList('正文'), ['正文']);
+    assert.deepEqual(extraList({ 卡: 'SSR' }), ['卡：SSR']);
+    assert.deepEqual(extraList(null), []);
+    assert.deepEqual(extraList(['', 'x']), ['x'], '空串要丢掉');
+  });
+  n += 1;
+  console.log('  ok extraList：string[] / 字符串 / 对象 / null 都归一化成数组');
+})();
 
 console.log(`api.test: ${n} passed`);

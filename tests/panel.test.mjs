@@ -18,6 +18,13 @@ function check(name, fn) {
   console.log(`  ok ${name}`);
 }
 
+/** 异步用例（v1.2 的 callAsync 要等微任务/定时器）；靠 ESM 顶层 await 收尾。 */
+async function checkAsync(name, fn) {
+  await fn();
+  n += 1;
+  console.log(`  ok ${name}`);
+}
+
 function makeEnv(options = {}) {
   const doc = createDocument();
   const storage = memoryStorage(options.storage ?? {});
@@ -988,6 +995,160 @@ check('复制：成新布局 → 库里多一条，原件还在', () => {
   // 选中项指向副本
   assert.equal(JSON.parse(storage.getItem('dshui.selected.v2')).global, lib[0].id);
   assert.equal(JSON.parse(storage.getItem('dshui.layouts.v2')).length, 1, '原件不是库里的示例，所以只多一条');
+  ui.destroy();
+});
+
+// ---------- v1.2：界面指令（ui / callAsync / durationMs） ----------
+
+const V12_LAYOUT = {
+  schema: 'dshui/1',
+  title: 'v12',
+  grid: { cols: 2, rows: 2 },
+  cells: [
+    { id: 'c1', kind: 'stat', label: '甲', var: '金币', area: [0, 0, 1, 1] },
+    { id: 'c2', kind: 'stat', label: '乙', var: '生命', area: [1, 0, 1, 1] },
+    {
+      id: 'go',
+      kind: 'button',
+      label: '抽卡',
+      area: [0, 1, 2, 1],
+      onClick: { kind: 'call', logic: '抽卡' },
+    },
+  ],
+};
+
+function v12Env(uiFor) {
+  return makeEnv({ ilb: { version: '1.2', uiFor } });
+}
+
+await checkAsync('v1.2：走 callAsync，先显示「执行中」再出结果', async () => {
+  const { doc, storage, fake } = v12Env(() => null);
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  // 还没等定时器回来：应该是"执行中"
+  const footText = () => findByClass(doc.body, 'dshui-foot').textContent;
+  assert.ok(footText().includes('执行中'), `点击后立刻要显示执行中，实际 ${footText()}`);
+  await sleep(10);
+  assert.ok(footText().includes('已执行'), `回来后要出结果，实际 ${footText()}`);
+  assert.equal(fake.state.calls.length, 1, '只调一次');
+  ui.destroy();
+});
+
+await checkAsync('v1.2：durationMs 和 extra[] 都进回执', async () => {
+  const { doc, storage } = v12Env(() => null);
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  const text = findByClass(doc.body, 'dshui-foot').textContent;
+  assert.ok(text.includes('你抽到了 SSR'), `extra 要显示，实际 ${text}`);
+  assert.ok(text.includes('41ms'), `耗时要显示，实际 ${text}`);
+  ui.destroy();
+});
+
+await checkAsync('v1.2：ui.toast 顶掉默认回执，并进读屏播报', async () => {
+  const { doc, storage } = v12Env((name) => (name === '抽卡' ? { seq: 1, toast: '抽到 SSR 了！' } : null));
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(findByClass(doc.body, 'dshui-foot').textContent.includes('抽到 SSR 了！'));
+  const live = findByClass(doc.body, 'dshui-sr-only');
+  assert.ok(live.textContent.includes('抽到 SSR 了！'), `播报区要念出来，实际 ${live.textContent}`);
+  ui.destroy();
+});
+
+await checkAsync('v1.2：ui.page 切页；页面不存在只提示不报错', async () => {
+  const twoPages = {
+    title: '两页',
+    grid: { cols: 2, rows: 1 },
+    pages: [
+      {
+        id: 'main',
+        title: '主界面',
+        grid: { cols: 2, rows: 1 },
+        cells: [
+          {
+            id: 'go',
+            kind: 'button',
+            label: '去背包',
+            area: [0, 0, 1, 1],
+            onClick: { kind: 'call', logic: '抽卡' },
+          },
+        ],
+      },
+      {
+        id: 'bag',
+        title: '背包',
+        grid: { cols: 2, rows: 1 },
+        cells: [{ id: 'bag0', kind: 'text', label: '空的', area: [0, 0, 1, 1] }],
+      },
+    ],
+  };
+  const { doc, storage } = v12Env(() => ({ seq: 1, page: 'bag' }));
+  const ui = initPanel(doc, storage, { sample: twoPages });
+  findButtonByText(doc.body, '去背包').click();
+  await sleep(10);
+  assert.ok(pageChip(doc).textContent.includes('背包'), `要切到背包页，实际 ${pageChip(doc).textContent}`);
+
+  // 目标页不存在：只提示，不抛错，也不切页
+  const { doc: doc2, storage: storage2 } = v12Env(() => ({ seq: 2, page: 'nope' }));
+  const ui2 = initPanel(doc2, storage2, { sample: twoPages });
+  findButtonByText(doc2.body, '去背包').click();
+  await sleep(10);
+  assert.ok(findByClass(doc2.body, 'dshui-foot').textContent.includes('没有这一页'));
+  assert.ok(pageChip(doc2).textContent.includes('主界面'), '不能乱切');
+  ui.destroy();
+  ui2.destroy();
+});
+
+await checkAsync('v1.2：ui.select 给控件打高亮，ui.ask 显示后能点掉', async () => {
+  const { doc, storage } = v12Env(() => ({
+    seq: 1,
+    select: 'c2',
+    ask: { title: '确认一下', text: '真的要用吗？', ok: '用了' },
+  }));
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  const picked = findAllByClass(doc.body, 'dshui-cell').filter((n) => n.classList.contains('is-picked'));
+  assert.equal(picked.length, 1, '只高亮一个格子');
+  assert.equal(picked[0].dataset.cellId, 'c2', `高亮的应是 c2，实际 ${picked[0].dataset.cellId}`);
+  const askBox = findByClass(doc.body, 'dshui-ask');
+  assert.equal(askBox.hidden, false, '提示条要出现');
+  assert.ok(findByClass(doc.body, 'dshui-ask-title').textContent.includes('确认一下'));
+  findByClass(doc.body, 'dshui-ask-ok').click();
+  assert.equal(findByClass(doc.body, 'dshui-ask').hidden, true, '点掉后消失');
+  ui.destroy();
+});
+
+await checkAsync('v1.2：同一逻辑同 seq 只生效一次，seq 变大再生效', async () => {
+  let seq = 1;
+  const { doc, storage } = v12Env(() => ({ seq, toast: `第${seq}次` }));
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(findByClass(doc.body, 'dshui-foot').textContent.includes('第1次'));
+
+  // 逻辑重放同一个 seq（比如刷新后重放）→ 界面指令丢掉，不再播一次
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(
+    !findByClass(doc.body, 'dshui-foot').textContent.includes('第1次'),
+    `重复 seq 不能再执行一次，实际 ${findByClass(doc.body, 'dshui-foot').textContent}`,
+  );
+
+  seq = 2;
+  findButtonByText(doc.body, '抽卡').click();
+  await sleep(10);
+  assert.ok(findByClass(doc.body, 'dshui-foot').textContent.includes('第2次'));
+  ui.destroy();
+});
+
+await checkAsync('v1.2：状态行显示 ui 能力', async () => {
+  const { doc, storage } = v12Env(() => null);
+  const ui = initPanel(doc, storage, { sample: V12_LAYOUT });
+  const status = findByClass(doc.body, 'dshui-status').textContent;
+  assert.ok(status.includes('v1.2'), `要显示接口版本，实际 ${status}`);
+  assert.ok(status.includes('ui'), `要显示 ui 能力，实际 ${status}`);
   ui.destroy();
 });
 
