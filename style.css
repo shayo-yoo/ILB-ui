@@ -186,7 +186,6 @@
 
 .dshui-vars {
   flex: 0 0 auto;
-  padding: 0 12px;
 }
 
 .dshui-vars-head {
@@ -288,8 +287,7 @@ button.dshui-chip:hover {
 
 .dshui-body.is-editing .dshui-grid,
 .dshui-body.is-editing .dshui-note,
-.dshui-body.is-editing .dshui-pages,
-.dshui-body.is-editing .dshui-vars,
+.dshui-body.is-editing .dshui-meta,
 .dshui-body.is-editing .dshui-tools {
   display: none;
 }
@@ -670,16 +668,89 @@ button.dshui-chip:hover {
   color: var(--dshui-bad);
 }
 
-.dshui-pages {
+/* ---------- 页面 / 变量：两条细 chip + 浮层（D-U36） ---------- */
+/* 常态只占一行 28px；点开是绝对定位浮层，不参与布局流，
+   所以展开它不会把下面的格子顶下去（手机键盘弹出时代价尤其明显）。 */
+.dshui-meta {
+  position: relative; /* 浮层的定位锚点 */
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  min-height: 28px;
+}
+
+.dshui-meta-chip {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--dshui-dim);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.dshui-meta-chip[hidden] {
+  display: none;
+}
+
+.dshui-meta-chip:hover {
+  border-color: var(--dshui-accent);
+  color: var(--dshui-fg);
+}
+
+.dshui-meta-chip[aria-expanded="true"] {
+  border-color: var(--dshui-accent);
+  background: rgba(120, 170, 255, 0.12);
+  color: var(--dshui-fg);
+}
+
+/* 动作切页后闪一下：否则界面"自己翻页"看起来像点错了 */
+.dshui-meta-chip.is-flash {
+  animation: dshui-flash 700ms ease-out;
+}
+
+@keyframes dshui-flash {
+  from {
+    box-shadow: 0 0 0 0 rgba(120, 170, 255, 0.55);
+  }
+  to {
+    box-shadow: 0 0 0 9px rgba(120, 170, 255, 0);
+  }
+}
+
+.dshui-pop {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
+  max-height: min(46vh, 320px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--dshui-line);
+  background: rgba(30, 33, 41, 0.99);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.dshui-pop[hidden] {
+  display: none;
+}
+
+.dshui-pages {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  padding: 8px 12px 0;
-}
-
-.dshui-pages:empty {
-  display: none;
 }
 
 .dshui-page-tab {

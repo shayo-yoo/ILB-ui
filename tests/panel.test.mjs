@@ -830,4 +830,165 @@ check('手机键盘：抽屉按 visualViewport 收缩，关抽屉还原', () => 
   ui.destroy();
 });
 
+const TWO_PAGES = {
+  title: '两页',
+  grid: { cols: 2, rows: 1 },
+  pages: [
+    {
+      id: 'one',
+      title: '第一页',
+      cells: [
+        { id: 'a', kind: 'text', text: '我在第一页', area: [0, 0, 2, 1] },
+        { id: 'go', kind: 'button', label: '去第二页', area: [0, 0, 2, 1], onClick: { kind: 'open', page: 'two' } },
+      ],
+    },
+    {
+      id: 'two',
+      title: '第二页',
+      cells: [{ id: 'b', kind: 'text', text: '我在第二页', area: [0, 0, 2, 1] }],
+    },
+  ],
+};
+
+const pagePop = (doc) => findByClass(doc.body, 'dshui-page-pop');
+const varPop = (doc) => findByClass(doc.body, 'dshui-var-pop');
+const pageChip = (doc) => findByClass(findByClass(doc.body, 'dshui-meta'), 'dshui-page-chip');
+const varChip = (doc) => findByClass(findByClass(doc.body, 'dshui-meta'), 'dshui-var-chip');
+
+check('折叠：页面/变量默认收成 chip，浮层不开就占一行', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  assert.ok(findByClass(doc.body, 'dshui-meta'), '有 meta 条');
+  assert.equal(pageChip(doc).hidden, false, '两页时页面 chip 要露出来');
+  assert.ok(pageChip(doc).textContent.includes('第一页'), `chip 上要写当前页，实际 ${pageChip(doc).textContent}`);
+  assert.equal(pageChip(doc).getAttribute('aria-expanded'), 'false');
+  assert.ok(varChip(doc).textContent.includes('变量 · 4'), `变量 chip 要报数量，实际 ${varChip(doc).textContent}`);
+  // 浮层默认看不到
+  assert.equal(pagePop(doc).hidden, true, '页面浮层默认收起');
+  assert.equal(varPop(doc).hidden, true, '变量浮层默认收起');
+  ui.destroy();
+});
+
+check('折叠：点 chip 展开浮层，两条 chip 互斥', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  pageChip(doc).click();
+  assert.equal(pagePop(doc).hidden, false, '页面浮层要开');
+  assert.equal(pageChip(doc).getAttribute('aria-expanded'), 'true');
+  assert.ok(pageChip(doc).textContent.includes('▴'));
+
+  varChip(doc).click();
+  assert.equal(pagePop(doc).hidden, true, '开变量浮层时要把页面浮层收掉');
+  assert.equal(varPop(doc).hidden, false);
+
+  varChip(doc).click();
+  assert.equal(varPop(doc).hidden, true, '再点一次收起');
+  assert.equal(JSON.parse(storage.getItem('dshui.ui.v1')).varsOpen, false, '开合状态要记住');
+  ui.destroy();
+});
+
+check('折叠：Esc 先收浮层，收完才关抽屉', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  findByClass(doc.body, 'dshui-fab').click();
+  const panel = findByClass(doc.body, 'dshui-panel');
+
+  pageChip(doc).click();
+  assert.equal(pagePop(doc).hidden, false);
+  panel.dispatch('keydown', { key: 'Escape' });
+  assert.equal(pagePop(doc).hidden, true, '第一下 Esc 只收浮层');
+  assert.equal(panel.hidden, false, '抽屉还在');
+
+  panel.dispatch('keydown', { key: 'Escape' });
+  assert.equal(panel.hidden, true, '第二下 Esc 才关抽屉');
+  ui.destroy();
+});
+
+check('折叠：点浮层外面收起', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  pageChip(doc).click();
+  assert.equal(pagePop(doc).hidden, false);
+  doc.dispatch('click', { target: findByClass(doc.body, 'dshui-grid') });
+  assert.equal(pagePop(doc).hidden, true, '点格子区域就收起');
+  ui.destroy();
+});
+
+check('折叠：动作切页后 chip 跟上并闪一下', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  assert.ok(pageChip(doc).textContent.includes('第一页'));
+  findButtonByText(doc.body, '去第二页').click();
+  assert.ok(pageChip(doc).textContent.includes('第二页'), `切页后 chip 要改，实际 ${pageChip(doc).textContent}`);
+  assert.ok(pageChip(doc).classList.contains('is-flash'), '闪一下，否则界面自己翻页像点错了');
+  ui.destroy();
+});
+
+check('折叠：单页布局不显示页面 chip', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: LAYOUT });
+  assert.equal(pageChip(doc).hidden, true, '只有一页时不用给切换入口');
+  assert.equal(varChip(doc).hidden, false);
+  ui.destroy();
+});
+
+check('复制：控件 ⧉ 生成副本并选中它', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+  const before = findAllByClass(doc.body, 'dshui-form-cell').length;
+  const rows = findAllByClass(doc.body, 'dshui-form-cell');
+  assert.equal(rows.length, before, '每个控件一行');
+  // 遍历顺序不保证，按行首编号找第 1 行
+  const row1 = rows.find((r) => r.textContent.trim().startsWith('1.'));
+  const copyBtn = findAllByClass(row1, 'dshui-icon-btn').find((b) => b.textContent === '⧉');
+  assert.ok(copyBtn, '第 1 行要有复制按钮');
+  copyBtn.click();
+  assert.equal(findAllByClass(doc.body, 'dshui-form-cell').length, before + 1, '多出一个控件');
+
+  // 草稿里检查：id 不重复、区域往下挪了一行、选中的是副本
+  const draft = JSON.parse(findByClass(doc.body, 'dshui-editor-text').value);
+  const cells = draft.pages ? draft.pages[0].cells : draft.cells;
+  const ids = cells.map((c) => c.id);
+  assert.equal(new Set(ids).size, ids.length, `id 不能重复：${ids.join(',')}`);
+  assert.equal(cells[1].area[1], cells[0].area[1] + (cells[0].area[3] || 1), '副本默认往下挪一行');
+  const active = findAllByClass(doc.body, 'dshui-form-cell-pick').find((n) => n.classList.contains('is-active'));
+  assert.ok(active.textContent.startsWith('2.'), `选中副本，实际 ${active.textContent}`);
+  ui.destroy();
+});
+
+check('复制：页 → 新页 id/控件 id 都不撞', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  buttonByExactText(doc, '编辑').click();
+  buttonByExactText(doc, '复制页').click();
+  const draft = JSON.parse(findByClass(doc.body, 'dshui-editor-text').value);
+  const pages = draft.pages;
+  assert.equal(pages.length, 3, '两页 → 三页');
+  const ids = pages.map((p) => p.id);
+  assert.equal(new Set(ids).size, 3, `页面 id 不能重复：${ids.join(',')}`);
+  assert.ok(pages[1].title.includes('副本'), `副本标题要带副本，实际 ${pages[1].title}`);
+  const cellIds = pages[1].cells.map((c) => c.id);
+  assert.equal(new Set(cellIds).size, cellIds.length, '副本页内控件 id 也不能重复');
+  ui.destroy();
+});
+
+check('复制：成新布局 → 库里多一条，原件还在', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage, { sample: TWO_PAGES });
+  buttonByExactText(doc, '编辑').click();
+  buttonByExactText(doc, '复制成新布局').click();
+  const lib = JSON.parse(storage.getItem('dshui.layouts.v2'));
+  assert.equal(lib.length, 1, '库里应有一条副本');
+  assert.ok(lib[0].title.includes('副本'), `标题带副本，实际 ${lib[0].title}`);
+  assert.ok(lib[0].id && lib[0].id !== 'sample', '副本要是自己的 id');
+  // 复制完切到副本上继续改，且已经不在编辑态
+  assert.ok(findByClass(doc.body, 'dshui-note').textContent.includes('副本'));
+  assert.equal(findByClass(doc.body, 'dshui-body').classList.contains('is-editing'), false);
+  // 选中项指向副本
+  assert.equal(JSON.parse(storage.getItem('dshui.selected.v2')).global, lib[0].id);
+  assert.equal(JSON.parse(storage.getItem('dshui.layouts.v2')).length, 1, '原件不是库里的示例，所以只多一条');
+  ui.destroy();
+});
+
 console.log(`panel.test: ${n} passed`);

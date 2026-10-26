@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.8.1';
+export const VERSION = '0.9.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -112,9 +112,16 @@ export function init(options = {}) {
     vpTop: null, // 最近一次按 visualViewport 算出来的 top/height；用来做抖动抑制
     vpHeight: null,
     peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
+    // 页面 / 变量默认收成两条细 chip（D-U36）：只在点开时弹浮层，不占内容高度。
+    metaOpen: {
+      pages: store.loadUi().pagesOpen === true,
+      vars: store.loadUi().varsOpen === true,
+    },
+    flashPage: false, // 动作切页后让 chip 闪一下，否则用户以为点错了
   };
   let cancelWait = null;
   let pressTimer = null; // 长按计时器
+  let flashTimer = null; // 切页闪烁复位的计时器
 
   const el = (tag, cls) => {
     const node = doc.createElement(tag);
@@ -177,8 +184,26 @@ export function init(options = {}) {
   const tools = el('div', 'dshui-tools');
 
   const note = el('div', 'dshui-note');
+  // 页面 / 变量降级成两条细 chip（D-U36）：常态只占一行 28px，
+  // 点开是浮层——浮层不参与布局流，展开不会把下面的格子顶下去。
+  const metaRow = el('div', 'dshui-meta');
+  const pageChip = el('button', 'dshui-meta-chip dshui-page-chip');
+  pageChip.setAttribute('type', 'button');
+  const varChip = el('button', 'dshui-meta-chip dshui-var-chip');
+  varChip.setAttribute('type', 'button');
+  const pagePop = el('div', 'dshui-pop dshui-page-pop');
+  pagePop.hidden = true;
+  pagePop.setAttribute('role', 'group');
+  pagePop.setAttribute('aria-label', '页面列表');
+  const varPop = el('div', 'dshui-pop dshui-var-pop');
+  varPop.hidden = true;
+  varPop.setAttribute('role', 'group');
+  varPop.setAttribute('aria-label', '变量列表');
   const pagesBox = el('div', 'dshui-pages');
   const varsBox = el('div', 'dshui-vars');
+  pagePop.append(pagesBox);
+  varPop.append(varsBox);
+  metaRow.append(pageChip, varChip, pagePop, varPop);
   const gridBox = el('div', 'dshui-grid');
   const gridBoxRef = gridBox; // renderGrid 的默认目标；预览层传自己的容器
 
@@ -223,10 +248,14 @@ export function init(options = {}) {
   const sampleBtn = el('button', 'dshui-small-btn');
   sampleBtn.setAttribute('type', 'button');
   sampleBtn.textContent = '填入示例';
+  const dupLayoutBtn = el('button', 'dshui-small-btn');
+  dupLayoutBtn.setAttribute('type', 'button');
+  dupLayoutBtn.textContent = '复制成新布局';
+  dupLayoutBtn.title = '把当前草稿复制一份进布局库，原件不动——改 2.0 版时用它';
   const closeEditorBtn = el('button', 'dshui-small-btn');
   closeEditorBtn.setAttribute('type', 'button');
   closeEditorBtn.textContent = '收起编辑';
-  editorActions.append(previewBtn, checkBtn, applyBtn, saveGlobalBtn, saveCharBtn, sampleBtn, closeEditorBtn);
+  editorActions.append(previewBtn, checkBtn, applyBtn, saveGlobalBtn, saveCharBtn, dupLayoutBtn, sampleBtn, closeEditorBtn);
 
   const importBox = el('div', 'dshui-import');
   importBox.hidden = true;
@@ -270,7 +299,7 @@ export function init(options = {}) {
 
   // 预览区 / 编辑区不再共用一屏：编辑是整块编辑器，预览是整块网格，都在抽屉里
   const body = el('div', 'dshui-body');
-  body.append(note, pagesBox, varsBox, gridBox, tools, editor);
+  body.append(note, metaRow, gridBox, tools, editor);
   const foot = el('div', 'dshui-foot');
   const footText = el('span', 'dshui-foot-text');
   const footMore = el('button', 'dshui-small-btn dshui-foot-more');
@@ -558,6 +587,7 @@ export function init(options = {}) {
 
   function setPage(pageId) {
     state.pageId = pageId;
+    state.metaOpen.pages = false; // 选完就把浮层收起，别挡住刚切过去的页面
     render();
   }
 
@@ -651,13 +681,12 @@ export function init(options = {}) {
 
     renderToolbar(layout);
     renderTools(layout);
-    renderPages(plan);
     note.textContent = usingSample()
       ? '内置示例布局（点右上角“编辑”改成你自己的）'
       : `布局：${layout.title || layout.id}`;
     note.classList.toggle('is-sample', usingSample());
 
-    renderVars(p, vars);
+    renderMeta(plan, p, vars);
     renderGrid(plan);
     renderEditor(layout);
     // 预览层要的是「当前草稿」的实时网格，和编辑态用的是同一个 plan
@@ -743,6 +772,64 @@ export function init(options = {}) {
       const label = state.purgeArmed ? `确认清理 ${orphans.length} 个？` : `清理失效（${orphans.length}）`;
       tools.append(button(label, () => purgeOrphans(orphans), 'dshui-small-btn dshui-danger-btn'));
     }
+  }
+
+  /** 两条 meta chip + 各自的浮层。只改文本与 hidden，不重建节点，避免闪烁。 */
+  function renderMeta(plan, p, vars) {
+    const pages = plan?.pages ?? [];
+    const showPages = pages.length > 1;
+    if (!showPages) state.metaOpen.pages = false;
+    pageChip.hidden = !showPages;
+    if (showPages) {
+      const active = pages.find((x) => x.id === plan.page.id);
+      pageChip.textContent = `页面 · ${active ? active.title || active.id : '—'} ${state.metaOpen.pages ? '▴' : '▾'}`;
+      pageChip.setAttribute('aria-expanded', state.metaOpen.pages ? 'true' : 'false');
+      pageChip.setAttribute('title', `共 ${pages.length} 页，点开切换`);
+      pageChip.classList.toggle('is-flash', state.flashPage === true);
+    }
+
+    const names = Object.keys(vars ?? {});
+    const showVars = p.state !== 'missing';
+    varChip.hidden = !showVars;
+    if (showVars) {
+      varChip.textContent = `变量 · ${names.length} ${state.metaOpen.vars ? '▴' : '▾'}`;
+      varChip.setAttribute('aria-expanded', state.metaOpen.vars ? 'true' : 'false');
+      varChip.setAttribute('title', names.length ? `共 ${names.length} 个变量，点开查看、点数字 +1` : '这条聊天还没有变量');
+    }
+
+    pagePop.hidden = !(showPages && state.metaOpen.pages);
+    varPop.hidden = !(showVars && state.metaOpen.vars);
+    renderPages(plan);
+    renderVars(p, vars);
+  }
+
+  function toggleMeta(which) {
+    const next = !state.metaOpen[which];
+    state.metaOpen[which] = next;
+    // 两条 chip 共用一个浮层位，同时开两个会互相盖住
+    if (next) state.metaOpen[which === 'pages' ? 'vars' : 'pages'] = false;
+    store.saveUi(which === 'pages' ? { pagesOpen: next } : { varsOpen: next });
+    render();
+  }
+
+  /** 点浮层外面 / Esc 时收起；返回 true 表示「确实收了一个」。 */
+  function closeMeta() {
+    if (!state.metaOpen.pages && !state.metaOpen.vars) return false;
+    state.metaOpen.pages = false;
+    state.metaOpen.vars = false;
+    render();
+    return true;
+  }
+
+  /** 动作切页时让 chip 闪一下：否则界面"自己翻页"看起来像点错了。 */
+  function flashPageChip() {
+    state.flashPage = true;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      state.flashPage = false;
+      if (!state.disposed) render();
+    }, 700);
+    render();
   }
 
   function renderPages(plan) {
@@ -1022,6 +1109,28 @@ export function init(options = {}) {
         syncJson();
         renderForm(true);
       }),
+      button('复制页', () => {
+        if (pages.length >= MAX_PAGES) {
+          setMsg('warn', `页面最多 ${MAX_PAGES} 个`);
+          return;
+        }
+        const copy = cloneJson(page);
+        copy.id = freeId(pages.map((p) => p.id), page.id, 'page');
+        copy.title = `${page.title || '页面'} 副本`;
+        // 控件 id 只在页内查重，副本自己重新编号，免得跟原件撞
+        const used = [];
+        copy.cells = (copy.cells ?? []).map((c) => {
+          const id = freeId(used, c.id, c.kind || 'cell');
+          used.push(id);
+          return { ...c, id };
+        });
+        pages.splice(pageIndex + 1, 0, copy);
+        state.form.pageIndex = pageIndex + 1;
+        state.form.cellIndex = 0;
+        syncJson();
+        renderForm(true);
+        setMsg('ok', `已复制「${page.title || '页面'}」，改了再保存`);
+      }),
       button('删除页', () => {
         if (pages.length <= 1) return;
         pages.splice(pageIndex, 1);
@@ -1054,9 +1163,13 @@ export function init(options = {}) {
         renderForm(true);
       });
       row.append(pick);
+      const copyBtn = button('⧉', () => copyCell(page, i), 'dshui-icon-btn');
+      copyBtn.title = '复制这个控件';
+      copyBtn.setAttribute('aria-label', `复制控件 ${i + 1}`);
       row.append(
         button('↑', () => moveCell(page, i, -1), 'dshui-icon-btn'),
         button('↓', () => moveCell(page, i, 1), 'dshui-icon-btn'),
+        copyBtn,
         button('删', () => {
           page.cells.splice(i, 1);
           state.form.cellIndex = Math.max(0, Math.min(state.form.cellIndex, page.cells.length - 1));
@@ -1091,6 +1204,37 @@ export function init(options = {}) {
 
     const cell = page.cells[state.form.cellIndex];
     if (cell) formBox.append(renderCellForm(cell, page));
+  }
+
+  /** 深拷贝：布局是纯 JSON，没有函数/循环引用，JSON 往返就够。 */
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  /** 在 used 里挑一个不撞的 id：base → base-2 → base-3 … */
+  function freeId(used, base, fallback) {
+    const root = String(base || fallback || 'item');
+    if (!used.includes(root)) return root;
+    let n = 2;
+    while (used.includes(`${root}-${n}`)) n += 1;
+    return `${root}-${n}`;
+  }
+
+  /** 复制一个控件：挪到原控件下一行，免得副本正好压在原件上。 */
+  function copyCell(page, index) {
+    const src = page.cells[index];
+    if (!src) return;
+    const copy = cloneJson(src);
+    copy.id = freeId(page.cells.map((c) => c.id), src.id, src.kind || 'cell');
+    const rows = page.grid?.rows ?? layout.grid?.rows ?? 4;
+    const area = Array.isArray(src.area) ? [...src.area] : [0, 0, 1, 1];
+    area[1] = Math.min(area[1] + area[3], Math.max(0, rows - area[3]));
+    copy.area = area;
+    page.cells.splice(index + 1, 0, copy);
+    state.form.cellIndex = index + 1;
+    syncJson();
+    renderForm(true);
+    setMsg('ok', `已复制 ${KIND_LABELS[src.kind] ?? src.kind}${src.label ? `「${src.label}」` : ''}，区域可能要调`);
   }
 
   function moveCell(page, index, delta) {
@@ -1422,8 +1566,46 @@ export function init(options = {}) {
     render();
   }
 
-  function exportNow() {
-    try {
+  /**
+   * 把当前草稿复制一份进布局库（原件不动），并切到副本上继续编辑。
+   * 想要「在现有 UI 上改出 2.0 版」时用这个，比先导出再导入省事。
+   */
+  function duplicateLayout() {
+    const parsed = parseDraft();
+    if (parsed.error) {
+      setMsg('bad', `先修好 JSON 再复制：${parsed.error}`);
+      return;
+    }
+    const result = validateLayout(parsed.value, {});
+    if (!result.ok) {
+      state.issues = { errors: result.errors, warnings: result.warnings };
+      renderIssues();
+      setMsg('bad', '当前草稿有错，复制前先修好（见下面的校验结果）');
+      return;
+    }
+    const copy = cloneJson(normalizeLayout(result.layout));
+    copy.id = ''; // 空 id 才会被分配新 id；否则会覆盖原件
+    delete copy.id;
+    copy.title = `${copy.title || '未命名面板'} 副本`;
+    const scope = copy.scope === 'character' ? 'character' : 'global';
+    const avatar = scope === 'character' ? getAvatar() : '';
+    if (scope === 'character' && !avatar) {
+      setMsg('warn', '当前没有角色卡，角色卡布局复制不了；改成全局再试');
+      return;
+    }
+    copy.scope = scope;
+    copy.avatar = avatar;
+    const entry = store.saveLayout(copy);
+    store.setSelectedId(entry.id, scopeKey({ scope, avatar }));
+    if (scope === 'global') store.setSelectedId(entry.id, 'global');
+    state.draft = null;
+    state.editing = false;
+    state.pageId = null;
+    setMsg('ok', `已复制为「${entry.title}」（原件没动），接着改它就行`);
+    render();
+  }
+
+  function exportNow() {    try {
       const layout = currentLayout();
       const text = exportText(layout);
       const blob = new Blob([text], { type: 'application/json' });
@@ -1494,6 +1676,10 @@ export function init(options = {}) {
         } else {
           state.pageId = target.id;
           setMsg('ok', `切到「${target.title}」`);
+          // 界面"自己翻页"时 chip 闪一下，顺带把页面浮层收起
+          state.metaOpen.pages = false;
+          flashPageChip();
+          return;
         }
         render();
         return;
@@ -1585,6 +1771,28 @@ export function init(options = {}) {
     state.open = false;
     applyOpen();
   });
+  pageChip.addEventListener('click', () => toggleMeta('pages'));
+  varChip.addEventListener('click', () => toggleMeta('vars'));
+  // 点浮层外面收起。用 pointerdown 记账，是因为 setPage/bump 会立即重画，
+  // 等 click 冒泡到 document 时目标节点已经被摘掉了，contains() 会误判成"外面"。
+  let pressInMeta = false;
+  const onMetaPointerDown = (ev) => {
+    const t = ev.target;
+    pressInMeta = !!(t && (metaRow.contains(t) || pagePop.contains(t) || varPop.contains(t)));
+  };
+  const onDocClick = (ev) => {
+    if (state.disposed) return;
+    if (!state.metaOpen.pages && !state.metaOpen.vars) {
+      pressInMeta = false;
+      return;
+    }
+    const t = ev.target;
+    const inside = pressInMeta || !!(t && (metaRow.contains(t) || pagePop.contains(t) || varPop.contains(t)));
+    pressInMeta = false;
+    if (!inside) closeMeta();
+  };
+  doc.addEventListener('pointerdown', onMetaPointerDown, true);
+  doc.addEventListener('click', onDocClick);
   helpBtn.addEventListener('click', () => {
     if (state.preview !== 'off') {
       state.preview = 'off';
@@ -1696,6 +1904,8 @@ export function init(options = {}) {
       render();
       return;
     }
+    // 浮层先收，浮层不在才关抽屉：Esc 的层级要跟视觉遮挡顺序一致
+    if (closeMeta()) return;
     closePanel();
   });
 
@@ -1737,6 +1947,7 @@ export function init(options = {}) {
   applyBtn.addEventListener('click', () => submitDraft(false, 'global'));
   saveGlobalBtn.addEventListener('click', () => submitDraft(true, 'global'));
   saveCharBtn.addEventListener('click', () => submitDraft(true, 'character'));
+  dupLayoutBtn.addEventListener('click', duplicateLayout);
   sampleBtn.addEventListener('click', () => {
     state.draft = normalizeLayout(sample);
     state.form = { pageIndex: 0, cellIndex: 0 };
@@ -1864,6 +2075,10 @@ export function init(options = {}) {
       viewport.removeEventListener('scroll', onViewportScroll);
     }
     if (typeof win.removeEventListener === 'function') win.removeEventListener('resize', onViewportResize);
+    if (typeof doc.removeEventListener === 'function') {
+      doc.removeEventListener('pointerdown', onMetaPointerDown, true);
+      doc.removeEventListener('click', onDocClick);
+    }
     if (state.unsub) {
       try {
         state.unsub();
