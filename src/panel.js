@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -105,7 +105,8 @@ export function init(options = {}) {
     purgeArmed: false,
     handleY: Number(store.loadUi().handleY) || 0, // 0 = 用默认位置（视口 62%）
     help: false, // true = 面板里显示使用说明
-    // 预览浮层：'off' 编辑态（全屏编辑器）| 'peek' 长按临时预览 | 'live' 点按锁定交互
+    // 预览层：'off' 编辑态（整块编辑器）| 'peek' 长按临时预览 | 'live' 点按锁定交互。
+    // 三种状态都发生在抽屉内部，不铺满视口（见 D-U26）。
     preview: 'off',
     peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
   };
@@ -176,7 +177,7 @@ export function init(options = {}) {
   const pagesBox = el('div', 'dshui-pages');
   const varsBox = el('div', 'dshui-vars');
   const gridBox = el('div', 'dshui-grid');
-  const gridBoxRef = gridBox; // renderGrid 的默认目标；预览浮层传自己的容器
+  const gridBoxRef = gridBox; // renderGrid 的默认目标；预览层传自己的容器
 
   // 编辑器
   const editor = el('div', 'dshui-editor');
@@ -246,9 +247,9 @@ export function init(options = {}) {
   const issueBox = el('div', 'dshui-issues');
   editor.append(editorHint, modeRow, formBox, textarea, editorActions, importBox, issueBox);
 
-  // 预览浮层：盖住整个视口，只放一张实时网格；编辑态时抽屉里没有网格可看。
-  // 必须挂在 .dshui-root 上、而不是 panel 里面：panel 有 backdrop-filter（会变成
-  // fixed 的包含块）和 overflow:hidden，挂在里面会被裁回 360px 抽屉。
+  // 预览层：**在抽屉里面**，占用正文那块地方——不铺满屏幕。
+  // 编辑时这里放编辑器，预览时这里放实时网格，两者不共存，面板自己的
+  // 标题栏 / 状态行 / 工具栏 / 底栏都留着，看起来还是 ILBUI 的窗口。
   const previewLayer = el('div', 'dshui-preview');
   previewLayer.hidden = true;
   const previewBar = el('div', 'dshui-preview-bar');
@@ -260,7 +261,7 @@ export function init(options = {}) {
   const previewGrid = el('div', 'dshui-preview-grid');
   previewLayer.append(previewBar, previewGrid);
 
-  // 预览区 / 编辑区不再共用一屏：编辑是全屏编辑器，预览走浮层
+  // 预览区 / 编辑区不再共用一屏：编辑是整块编辑器，预览是整块网格，都在抽屉里
   const body = el('div', 'dshui-body');
   body.append(note, pagesBox, varsBox, gridBox, tools, editor);
   const foot = el('div', 'dshui-foot');
@@ -283,8 +284,8 @@ export function init(options = {}) {
   liveBox.setAttribute('aria-atomic', 'true');
   state.lastLive = '';
 
-  panel.append(head, status, toolbar, body, foot, helpBox, liveBox);
-  root.append(fab, panel, previewLayer);
+  panel.append(head, status, toolbar, body, previewLayer, foot, helpBox, liveBox);
+  root.append(fab, panel);
   doc.body.append(root);
 
   // ---------- 小工具 ----------
@@ -591,7 +592,7 @@ export function init(options = {}) {
     renderVars(p, vars);
     renderGrid(plan);
     renderEditor(layout);
-    // 预览浮层要的是「当前草稿」的实时网格，和编辑态用的是同一个 plan
+    // 预览层要的是「当前草稿」的实时网格，和编辑态用的是同一个 plan
     if (state.preview !== 'off') renderGrid(plan, previewGrid);
     renderFoot();
   }
@@ -837,29 +838,25 @@ export function init(options = {}) {
   }
 
   function renderEditor(layout) {
-    // 预览浮层开着时，编辑器和预览互斥：浮层盖在抽屉上，下面不留网格
+    // 预览层占正文的位置：和编辑器、浏览件互斥，但面板外壳（标题栏/状态行/工具栏/底栏）留着
     const previewing = state.preview !== 'off';
-    // 编辑态就是全屏编辑器：正文的浏览件交给 CSS（.dshui-body.is-editing 下全部 display:none）
+    // 编辑态就是整块编辑器：正文的浏览件交给 CSS（.dshui-body.is-editing 下全部 display:none）
     const fullEditor = state.editing && !previewing;
     editor.hidden = !fullEditor;
     editor.classList.toggle('is-open', fullEditor);
     body.classList.toggle('is-editing', fullEditor);
     editor.style.height = '';
     previewLayer.hidden = !previewing;
+    // 预览时正文整块让位（不只是藏网格）：否则会看到「网格 + 编辑器」上下堆着
+    body.hidden = previewing;
+    body.style.display = previewing ? 'none' : '';
     if (previewing) {
-      // 预览要像真界面：抽屉自己的状态条/工具栏/底栏也不出现
-      status.style.display = 'none';
-      toolbar.style.display = 'none';
-      foot.style.display = 'none';
       previewBarText.textContent = state.preview === 'live' ? '交互预览 · 点按钮会真的改变量' : '临时预览 · 松手返回';
       previewBar.classList.toggle('is-live', state.preview === 'live');
       previewBtn.classList.toggle('is-active', state.preview === 'live');
       previewBtn.setAttribute('aria-pressed', state.preview === 'live' ? 'true' : 'false');
       previewBtn.textContent = state.preview === 'live' ? '结束预览' : '预览';
     } else {
-      status.style.display = '';
-      toolbar.style.display = '';
-      foot.style.display = '';
       previewBtn.classList.remove('is-active');
       previewBtn.setAttribute('aria-pressed', 'false');
       previewBtn.textContent = '预览';
@@ -1748,7 +1745,7 @@ export function init(options = {}) {
     }
     if (typeof cancelWait === 'function') cancelWait();
     if (typeof cancelPress === 'function') cancelPress();
-    // 预览浮层也挂在 root 下（见 D-U24），root.remove() 会一并摘掉
+    // 预览层是 panel 的子节点（见 D-U26），root.remove() 会一并摘掉
     root.remove();
     if (globalThis.DSHUI === controller) delete globalThis.DSHUI;
   }

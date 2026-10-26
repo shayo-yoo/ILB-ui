@@ -479,15 +479,21 @@ check('预览：点一下进入交互态，再点一下回编辑', () => {
 
   const layer = findByClass(doc.body, 'dshui-preview');
   const btn = findByClass(doc.body, 'dshui-preview-btn');
-  assert.ok(layer, '应有预览浮层');
-  assert.equal(layer.hidden, true, '未预览时浮层藏着');
-  // 浮层必须挂 .dshui-root 上，不能塞进 panel：panel 有 backdrop-filter（会成为 fixed 的
-  // 包含块）和 overflow:hidden，挂里面会被裁回 360px 抽屉，铺不满视口。
-  assert.equal(layer.parent, findByClass(doc.body, 'dshui-root'), '浮层挂在 root 上，不在 panel 里');
+  assert.ok(layer, '应有预览层');
+  assert.equal(layer.hidden, true, '未预览时预览层藏着');
+  // 预览在抽屉「里面」：它是 panel 的子节点，占正文那块地方，不铺满屏幕
+  const panel = findByClass(doc.body, 'dshui-panel');
+  assert.equal(layer.parent, panel, '预览层挂在 panel 里，不挂 root');
+  assert.equal(findByClass(doc.body, 'dshui-root').children.includes(layer), false, 'root 下没有预览层');
 
   btn.click();
-  assert.equal(layer.hidden, false, '点按后浮层出现');
+  assert.equal(layer.hidden, false, '点按后预览层出现');
   assert.equal(findByClass(doc.body, 'dshui-editor').hidden, true, '预览时编辑器让位');
+  assert.equal(findByClass(doc.body, 'dshui-body').hidden, true, '预览时正文整块让位');
+  // 面板外壳留着：这才叫「在 ILBUI 的窗口里预览」，而不是另开一屏
+  assert.equal(findByClass(doc.body, 'dshui-status').style.display, '', '状态行还在');
+  assert.equal(findByClass(doc.body, 'dshui-toolbar').style.display, '', '工具栏还在');
+  assert.equal(findByClass(doc.body, 'dshui-foot').style.display, '', '底栏还在');
   assert.ok(findByClass(doc.body, 'dshui-preview-text').textContent.includes('交互预览'));
   assert.equal(btn.textContent, '结束预览');
   assert.equal(btn.getAttribute('aria-pressed'), 'true');
@@ -495,10 +501,11 @@ check('预览：点一下进入交互态，再点一下回编辑', () => {
   // 交互态：预览里的按钮真的能改变量
   const before = JSON.parse(storage.getItem('dshui.vars.demo') ?? 'null');
   const previewGrid = findByClass(doc.body, 'dshui-preview-grid');
-  assert.ok(previewGrid.children.length > 0, '预览浮层里应画出网格');
+  assert.ok(previewGrid.children.length > 0, '预览层里应画出网格');
 
   btn.click();
   assert.equal(layer.hidden, true, '再点一次回到编辑');
+  assert.equal(findByClass(doc.body, 'dshui-body').hidden, false, '正文回来了');
   assert.equal(findByClass(doc.body, 'dshui-editor').hidden, false, '编辑器回来了');
   assert.equal(btn.textContent, '预览');
   void before;

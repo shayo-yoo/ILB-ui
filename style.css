@@ -895,24 +895,17 @@ button.dshui-chip:hover {
   overflow-x: auto;
 }
 
-/* ---------- 预览浮层 ----------
-   编辑是全屏编辑器，预览也不再「挤在抽屉里」：点/按住预览时这层铺满整个视口，
-   里面只放一张实时网格，看起来就和真的把界面铺在页面上一样。
-   视口高度用 dvh 兜底（手机地址栏伸缩时 vh 会变），见决策记录 D-U07。 */
+/* ---------- 预览层 ----------
+   预览不铺满屏幕：它就长在抽屉正文那块地方，和编辑器互斥。
+   面板的标题栏 / 状态行 / 工具栏 / 底栏都留着，所以看起来还是 ILBUI 的窗口。 */
 .dshui-preview {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
-  z-index: 40;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--dshui-bg);
+  overflow: hidden;
 }
 
-/* 铺满视口，内边距比抽屉里宽松一点，免得元素贴边 */
 .dshui-preview[hidden] {
   display: none;
 }
@@ -922,7 +915,7 @@ button.dshui-chip:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--dshui-line);
 }
 
@@ -940,7 +933,7 @@ button.dshui-chip:hover {
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 16px;
+  padding: 12px;
   display: grid;
   gap: 6px;
   overflow: auto;
