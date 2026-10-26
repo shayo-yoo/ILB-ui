@@ -119,12 +119,28 @@ class El {
     return this;
   }
 
-  /** 触发一次点击（测试用）。 */
-  click() {
-    const list = this.listeners.get('click') ?? [];
-    const event = { type: 'click', target: this, currentTarget: this, preventDefault() {}, stopPropagation() {} };
+  /** 派发一次任意事件（测试用）。props 会合进事件对象。 */
+  dispatch(type, props = {}) {
+    const list = [...(this.listeners.get(type) ?? [])];
+    const event = {
+      type,
+      target: this,
+      currentTarget: this,
+      button: 0,
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0,
+      preventDefault() {},
+      stopPropagation() {},
+      ...props,
+    };
     for (const fn of list) fn(event);
     return this;
+  }
+
+  /** 触发一次点击（测试用）。 */
+  click() {
+    return this.dispatch('click');
   }
 }
 
@@ -133,6 +149,21 @@ export function createDocument() {
     body: new El('body'),
     createElement: (tag) => new El(tag),
     createTextNode: (text) => new El('#text').withText(String(text)),
+    // 全局监听（拖动条/预览按钮松手时用）；测试里手动派发
+    listeners: new Map(),
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = this.listeners.get(type);
+      if (!list) return;
+      const i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
+    },
+    dispatch(type, props = {}) {
+      for (const fn of [...(this.listeners.get(type) ?? [])]) fn({ type, preventDefault() {}, ...props });
+    },
   };
   return doc;
 }

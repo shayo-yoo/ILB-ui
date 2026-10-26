@@ -278,50 +278,26 @@ button.dshui-chip:hover {
   flex: 0 0 auto;
   margin: 0 12px;
   border-radius: 10px;
+  display: grid; /* 默认就在这里；renderGrid 只补 cols/rows/gap */
 }
 
-/* 编辑时把剩余空间给预览区，但别把编辑区挤没；两者之间可拖动 */
+/* 编辑态 = 全屏编辑器：正文的浏览件全部让位，编辑器独占剩下的高度 */
 .dshui-body.is-editing {
   overflow: hidden;
 }
 
-.dshui-body.is-editing .dshui-grid {
-  flex: 1 1 auto;
-  min-height: 72px;
-  overflow: auto;
-  align-content: start;
-}
-
-.dshui-splitter {
-  flex: 0 0 auto;
-  height: 12px;
-  margin: 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: ns-resize;
-  touch-action: none;
-}
-
-.dshui-splitter[hidden] {
+.dshui-body.is-editing .dshui-grid,
+.dshui-body.is-editing .dshui-note,
+.dshui-body.is-editing .dshui-pages,
+.dshui-body.is-editing .dshui-vars,
+.dshui-body.is-editing .dshui-tools {
   display: none;
 }
 
-.dshui-splitter::after {
-  content: '';
-  width: 46px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--dshui-line);
-}
-
-.dshui-splitter:hover::after,
-.dshui-body.is-dragging .dshui-splitter::after {
-  background: var(--dshui-accent);
-}
-
-.dshui-body.is-dragging {
-  user-select: none;
+.dshui-body.is-editing .dshui-editor {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
 }
 
 .dshui-cell {
@@ -578,25 +554,14 @@ button.dshui-chip:hover {
   opacity: 0.7;
 }
 
-/* 编辑器 */
+/* 编辑器（编辑态独占整块，见 .dshui-body.is-editing） */
 .dshui-editor {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--dshui-line);
-}
-
-/* 编辑时默认给编辑区一半高度；拖动条会写内联高度覆盖它 */
-.dshui-body.is-editing .dshui-editor {
-  flex: 0 0 auto;
-  height: 50%;
-  min-height: 140px;
   padding: 8px 12px 0;
-  margin-top: 2px;
-  border-top: 0;
 }
 
 .dshui-editor[hidden] {
@@ -928,4 +893,68 @@ button.dshui-chip:hover {
   font-size: 11px;
   line-height: 1.5;
   overflow-x: auto;
+}
+
+/* ---------- 预览浮层 ----------
+   编辑是全屏编辑器，预览也不再「挤在抽屉里」：点/按住预览时这层铺满整个视口，
+   里面只放一张实时网格，看起来就和真的把界面铺在页面上一样。
+   视口高度用 dvh 兜底（手机地址栏伸缩时 vh 会变），见决策记录 D-U07。 */
+.dshui-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--dshui-bg);
+}
+
+/* 铺满视口，内边距比抽屉里宽松一点，免得元素贴边 */
+.dshui-preview[hidden] {
+  display: none;
+}
+
+.dshui-preview-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--dshui-line);
+}
+
+.dshui-preview-text {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--dshui-dim);
+}
+
+.dshui-preview-bar.is-live .dshui-preview-text {
+  color: var(--dshui-ok);
+}
+
+.dshui-preview-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+  align-content: start;
+}
+
+/* 预览按钮：长按/点按两种用法，给一点视觉提示 */
+.dshui-preview-btn {
+  border-color: var(--dshui-accent);
+  color: var(--dshui-accent);
+  touch-action: none;
+  user-select: none;
+}
+
+.dshui-preview-btn.is-active {
+  background: rgba(122, 162, 255, 0.18);
 }

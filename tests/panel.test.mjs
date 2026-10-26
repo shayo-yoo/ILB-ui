@@ -6,6 +6,7 @@ import {
   findAllByClass,
   findButtonByText,
   memoryStorage,
+  sleep,
 } from './dom-stub.mjs';
 import { makeFakeIlb } from './fake-ilb.mjs';
 import SAMPLE from '../ui/sample-layout.js';
@@ -451,20 +452,111 @@ check('表单：控件类型显示中文，存的仍是英文 kind', () => {
   ui.destroy();
 });
 
-check('编辑区：拖动条只在编辑时出现，记住上次高度', () => {
-  const { doc, storage } = makeEnv({ storage: { 'dshui.ui.v1': JSON.stringify({ open: false, editorHeight: 420 }) } });
+check('编辑态：全屏编辑器，浏览件交给 CSS 让位', () => {
+  const { doc, storage } = makeEnv();
   const ui = initPanel(doc, storage);
-  const splitter = findByClass(doc.body, 'dshui-splitter');
-  assert.ok(splitter, '应创建拖动条');
-  assert.equal(splitter.hidden, true, '未编辑时拖动条隐藏');
+  const body = findByClass(doc.body, 'dshui-body');
+
+  assert.ok(!body.classList.contains('is-editing'), '默认不是编辑态');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, true, '默认编辑器藏着');
 
   buttonByExactText(doc, '编辑').click();
-  assert.equal(splitter.hidden, false, '编辑时拖动条出现');
-  assert.ok(findByClass(doc.body, 'dshui-body').classList.contains('is-editing'));
-  assert.equal(findByClass(doc.body, 'dshui-editor').style.height, '420px', '恢复上次拖动的高度');
+  // 浏览器里由 .dshui-body.is-editing 下的 CSS 把网格/工具栏等藏掉
+  assert.ok(body.classList.contains('is-editing'), '编辑时 body 带 is-editing（CSS 据此隐藏浏览件）');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, false, '编辑器可见');
+  assert.ok(findByClass(doc.body, 'dshui-editor').classList.contains('is-open'));
 
   buttonByExactText(doc, '收起编辑').click();
-  assert.equal(splitter.hidden, true, '退出编辑后拖动条隐藏');
+  assert.ok(!body.classList.contains('is-editing'), '退出编辑后恢复');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, true);
+  ui.destroy();
+});
+
+check('预览：点一下进入交互态，再点一下回编辑', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+
+  const layer = findByClass(doc.body, 'dshui-preview');
+  const btn = findByClass(doc.body, 'dshui-preview-btn');
+  assert.ok(layer, '应有预览浮层');
+  assert.equal(layer.hidden, true, '未预览时浮层藏着');
+  // 浮层必须挂 .dshui-root 上，不能塞进 panel：panel 有 backdrop-filter（会成为 fixed 的
+  // 包含块）和 overflow:hidden，挂里面会被裁回 360px 抽屉，铺不满视口。
+  assert.equal(layer.parent, findByClass(doc.body, 'dshui-root'), '浮层挂在 root 上，不在 panel 里');
+
+  btn.click();
+  assert.equal(layer.hidden, false, '点按后浮层出现');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, true, '预览时编辑器让位');
+  assert.ok(findByClass(doc.body, 'dshui-preview-text').textContent.includes('交互预览'));
+  assert.equal(btn.textContent, '结束预览');
+  assert.equal(btn.getAttribute('aria-pressed'), 'true');
+
+  // 交互态：预览里的按钮真的能改变量
+  const before = JSON.parse(storage.getItem('dshui.vars.demo') ?? 'null');
+  const previewGrid = findByClass(doc.body, 'dshui-preview-grid');
+  assert.ok(previewGrid.children.length > 0, '预览浮层里应画出网格');
+
+  btn.click();
+  assert.equal(layer.hidden, true, '再点一次回到编辑');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, false, '编辑器回来了');
+  assert.equal(btn.textContent, '预览');
+  void before;
+  ui.destroy();
+});
+
+check('预览：长按是临时预览，松手自动回编辑', () => {
+  const { doc, storage } = makeEnv();
+  // 注入一个手动触发的计时器：长按逻辑不用等真实时间，也就不会跨用例串状态
+  let fire = null;
+  const ui = initPanel(doc, storage, {
+    setTimer: (fn) => {
+      fire = fn;
+      return 1;
+    },
+    clearTimer: () => {
+      fire = null;
+    },
+  });
+  buttonByExactText(doc, '编辑').click();
+
+  const layer = findByClass(doc.body, 'dshui-preview');
+  const btn = findByClass(doc.body, 'dshui-preview-btn');
+
+  btn.dispatch('pointerdown', { button: 0, pointerId: 7 });
+  assert.equal(typeof fire, 'function', '按下后应排上长按计时');
+  assert.equal(layer.hidden, true, '还没到阈值，仍是编辑态');
+
+  fire(); // 触发长按
+  assert.equal(layer.hidden, false, '长按后浮层出现');
+  assert.ok(findByClass(doc.body, 'dshui-preview-text').textContent.includes('临时预览'));
+
+  btn.dispatch('pointerup', { button: 0, pointerId: 7 });
+  assert.equal(layer.hidden, true, '松手就回编辑');
+  assert.equal(findByClass(doc.body, 'dshui-editor').hidden, false);
+
+  // 松手后浏览器补发的 click 不该把界面锁进交互态
+  btn.click();
+  assert.equal(layer.hidden, true, '收尾的 click 被吃掉');
+  ui.destroy();
+});
+
+check('预览：返回按钮与 Esc 都能退出', () => {
+  const { doc, storage } = makeEnv();
+  const ui = initPanel(doc, storage);
+  buttonByExactText(doc, '编辑').click();
+  const layer = findByClass(doc.body, 'dshui-preview');
+  const btn = findByClass(doc.body, 'dshui-preview-btn');
+
+  btn.click();
+  assert.equal(layer.hidden, false);
+  buttonByExactText(doc, '返回编辑').click();
+  assert.equal(layer.hidden, true, '返回编辑按钮生效');
+
+  btn.click();
+  assert.equal(layer.hidden, false);
+  findByClass(doc.body, 'dshui-panel').dispatch('keydown', { key: 'Escape' });
+  assert.equal(layer.hidden, true, 'Esc 生效');
   ui.destroy();
 });
 
@@ -544,4 +636,3 @@ check('missing：没有 ILB 也不崩，给出提示', () => {
 });
 
 console.log(`panel.test: ${n} passed`);
-

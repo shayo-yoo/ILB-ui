@@ -37,7 +37,7 @@ import { HANDLE, avoidTaken, clampHandleY, handleLeft, maxHandleTop } from './pl
 import SAMPLE_LAYOUT from '../ui/sample-layout.js';
 import { HELP_SECTIONS } from '../ui/help.js';
 
-export const VERSION = '0.5.1';
+export const VERSION = '0.6.0';
 
 const GRID_FIELDS = [
   ['cols', '列数'],
@@ -103,11 +103,14 @@ export function init(options = {}) {
     importOpen: false,
     importText: '',
     purgeArmed: false,
-    editorHeight: Number(store.loadUi().editorHeight) || 0, // 0 = 用 CSS 默认
     handleY: Number(store.loadUi().handleY) || 0, // 0 = 用默认位置（视口 62%）
     help: false, // true = 面板里显示使用说明
+    // 预览浮层：'off' 编辑态（全屏编辑器）| 'peek' 长按临时预览 | 'live' 点按锁定交互
+    preview: 'off',
+    peekArmed: false, // 长按松手的收尾 click 要吃掉，避免顺手锁进交互态
   };
   let cancelWait = null;
+  let pressTimer = null; // 长按计时器
 
   const el = (tag, cls) => {
     const node = doc.createElement(tag);
@@ -172,6 +175,7 @@ export function init(options = {}) {
   const pagesBox = el('div', 'dshui-pages');
   const varsBox = el('div', 'dshui-vars');
   const gridBox = el('div', 'dshui-grid');
+  const gridBoxRef = gridBox; // renderGrid 的默认目标；预览浮层传自己的容器
 
   // 编辑器
   const editor = el('div', 'dshui-editor');
@@ -193,6 +197,12 @@ export function init(options = {}) {
   textarea.setAttribute('placeholder', `{ "schema": "${SCHEMA_ID}", "title": "…", "cells": [] }`);
 
   const editorActions = el('div', 'dshui-editor-actions');
+  const previewBtn = el('button', 'dshui-small-btn dshui-preview-btn');
+  previewBtn.setAttribute('type', 'button');
+  previewBtn.textContent = '预览';
+  previewBtn.setAttribute('title', '按住 = 临时预览（松手回到编辑器）；点一下 = 进入交互模式，再点一次返回编辑');
+  previewBtn.setAttribute('aria-label', '预览');
+  previewBtn.setAttribute('aria-pressed', 'false');
   const checkBtn = el('button', 'dshui-small-btn');
   checkBtn.setAttribute('type', 'button');
   checkBtn.textContent = '校验';
@@ -211,7 +221,7 @@ export function init(options = {}) {
   const closeEditorBtn = el('button', 'dshui-small-btn');
   closeEditorBtn.setAttribute('type', 'button');
   closeEditorBtn.textContent = '收起编辑';
-  editorActions.append(checkBtn, applyBtn, saveGlobalBtn, saveCharBtn, sampleBtn, closeEditorBtn);
+  editorActions.append(previewBtn, checkBtn, applyBtn, saveGlobalBtn, saveCharBtn, sampleBtn, closeEditorBtn);
 
   const importBox = el('div', 'dshui-import');
   importBox.hidden = true;
@@ -235,16 +245,23 @@ export function init(options = {}) {
   const issueBox = el('div', 'dshui-issues');
   editor.append(editorHint, modeRow, formBox, textarea, editorActions, importBox, issueBox);
 
-  // 预览区 / 编辑区之间的拖动条：只改高度，不碰声明
-  const splitter = el('div', 'dshui-splitter');
-  splitter.setAttribute('role', 'separator');
-  splitter.setAttribute('aria-orientation', 'horizontal');
-  splitter.setAttribute('aria-label', '拖动调整预览与编辑区的高度');
-  splitter.setAttribute('title', '上下拖动：调整预览 / 编辑区的高度（双击恢复自动）');
-  splitter.hidden = true;
+  // 预览浮层：盖住整个视口，只放一张实时网格；编辑态时抽屉里没有网格可看。
+  // 必须挂在 .dshui-root 上、而不是 panel 里面：panel 有 backdrop-filter（会变成
+  // fixed 的包含块）和 overflow:hidden，挂在里面会被裁回 360px 抽屉。
+  const previewLayer = el('div', 'dshui-preview');
+  previewLayer.hidden = true;
+  const previewBar = el('div', 'dshui-preview-bar');
+  const previewBarText = el('span', 'dshui-preview-text');
+  const previewBarBtn = el('button', 'dshui-small-btn');
+  previewBarBtn.setAttribute('type', 'button');
+  previewBarBtn.textContent = '返回编辑';
+  previewBar.append(previewBarText, previewBarBtn);
+  const previewGrid = el('div', 'dshui-preview-grid');
+  previewLayer.append(previewBar, previewGrid);
 
+  // 预览区 / 编辑区不再共用一屏：编辑是全屏编辑器，预览走浮层
   const body = el('div', 'dshui-body');
-  body.append(note, pagesBox, varsBox, gridBox, tools, splitter, editor);
+  body.append(note, pagesBox, varsBox, gridBox, tools, editor);
   const foot = el('div', 'dshui-foot');
   const footText = el('span', 'dshui-foot-text');
   const footMore = el('button', 'dshui-small-btn dshui-foot-more');
@@ -258,7 +275,7 @@ export function init(options = {}) {
   helpBox.style.display = 'none';
 
   panel.append(head, status, toolbar, body, foot, helpBox);
-  root.append(fab, panel);
+  root.append(fab, panel, previewLayer);
   doc.body.append(root);
 
   // ---------- 小工具 ----------
@@ -470,6 +487,7 @@ export function init(options = {}) {
     status.style.display = help ? 'none' : '';
     toolbar.style.display = help ? 'none' : '';
     body.style.display = help ? 'none' : '';
+    previewLayer.hidden = help || state.preview === 'off';
     foot.style.display = help ? 'none' : '';
     editBtn.style.display = help ? 'none' : '';
     helpBtn.textContent = help ? '返回' : '?';
@@ -523,6 +541,8 @@ export function init(options = {}) {
     renderVars(p, vars);
     renderGrid(plan);
     renderEditor(layout);
+    // 预览浮层要的是「当前草稿」的实时网格，和编辑态用的是同一个 plan
+    if (state.preview !== 'off') renderGrid(plan, previewGrid);
     renderFoot();
   }
 
@@ -661,7 +681,7 @@ export function init(options = {}) {
     varsBox.append(chips);
   }
 
-  function renderGrid(plan) {
+  function renderGrid(plan, gridBox = gridBoxRef) {
     clear(gridBox);
     gridBox.style.display = 'grid';
     gridBox.style.gridTemplateColumns = `repeat(${plan.grid.cols}, minmax(${plan.grid.minCellWidth}px, 1fr))`;
@@ -757,15 +777,37 @@ export function init(options = {}) {
   }
 
   function renderEditor(layout) {
-    editor.hidden = !state.editing;
-    editor.classList.toggle('is-open', state.editing);
-    splitter.hidden = !state.editing;
-    body.classList.toggle('is-editing', state.editing);
-    editor.style.height = state.editing && state.editorHeight ? `${state.editorHeight}px` : '';
+    // 预览浮层开着时，编辑器和预览互斥：浮层盖在抽屉上，下面不留网格
+    const previewing = state.preview !== 'off';
+    // 编辑态就是全屏编辑器：正文的浏览件交给 CSS（.dshui-body.is-editing 下全部 display:none）
+    const fullEditor = state.editing && !previewing;
+    editor.hidden = !fullEditor;
+    editor.classList.toggle('is-open', fullEditor);
+    body.classList.toggle('is-editing', fullEditor);
+    editor.style.height = '';
+    previewLayer.hidden = !previewing;
+    if (previewing) {
+      // 预览要像真界面：抽屉自己的状态条/工具栏/底栏也不出现
+      status.style.display = 'none';
+      toolbar.style.display = 'none';
+      foot.style.display = 'none';
+      previewBarText.textContent = state.preview === 'live' ? '交互预览 · 点按钮会真的改变量' : '临时预览 · 松手返回';
+      previewBar.classList.toggle('is-live', state.preview === 'live');
+      previewBtn.classList.toggle('is-active', state.preview === 'live');
+      previewBtn.setAttribute('aria-pressed', state.preview === 'live' ? 'true' : 'false');
+      previewBtn.textContent = state.preview === 'live' ? '结束预览' : '预览';
+    } else {
+      status.style.display = '';
+      toolbar.style.display = '';
+      foot.style.display = '';
+      previewBtn.classList.remove('is-active');
+      previewBtn.setAttribute('aria-pressed', 'false');
+      previewBtn.textContent = '预览';
+    }
     applyModeUi();
     importBox.hidden = !state.importOpen;
     if (state.importOpen && doc.activeElement !== importTextEl) importTextEl.value = state.importText;
-    if (!state.editing) return;
+    if (!fullEditor) return;
 
     if (state.mode === 'json') {
       if (doc.activeElement !== textarea) textarea.value = JSON.stringify(layout, null, 2);
@@ -1391,16 +1433,23 @@ export function init(options = {}) {
     applyOpen();
   });
   helpBtn.addEventListener('click', () => {
+    if (state.preview !== 'off') {
+      state.preview = 'off';
+      cancelPress();
+    }
     state.help = state.help !== true;
     render();
   });
   editBtn.addEventListener('click', () => {
     if (state.editing) {
       state.editing = false;
+      state.preview = 'off';
+      cancelPress();
       render();
       return;
     }
     state.editing = true;
+    state.preview = 'off';
     state.draft = normalizeLayout(currentLayout());
     state.form = { pageIndex: currentPageIndex(), cellIndex: 0 };
     state.mode = 'form';
@@ -1410,6 +1459,88 @@ export function init(options = {}) {
   });
   formModeBtn.addEventListener('click', () => switchMode('form'));
   jsonModeBtn.addEventListener('click', () => switchMode('json'));
+
+  // ---------- 预览按钮：按住看，点按进交互 ----------
+  // 阈值可注入：测试里传 longPressMs 就能免掉真实计时
+  const LONG_PRESS_MS = Number.isFinite(options.longPressMs) ? options.longPressMs : 220;
+  const setTimer = typeof options.setTimer === 'function' ? options.setTimer : (fn, ms) => setTimeout(fn, ms);
+  const clearTimer = typeof options.clearTimer === 'function' ? options.clearTimer : (id) => clearTimeout(id);
+
+  function cancelPress() {
+    if (pressTimer === null) return;
+    clearTimer(pressTimer);
+    pressTimer = null;
+  }
+
+  function startPress() {
+    if (!state.editing) return;
+    cancelPress();
+    state.peekArmed = false; // 新一轮按压：清掉上一轮没被 click 消费的标记
+    pressTimer = setTimer(() => {
+      pressTimer = null;
+      // 长按成立：临时预览（松手就回去）
+      state.preview = 'peek';
+      state.peekArmed = true;
+      render();
+    }, LONG_PRESS_MS);
+  }
+
+  /** 松手：临时预览结束；点按锁定态不在这里结束。 */
+  function endPress() {
+    const wasPeek = state.preview === 'peek';
+    cancelPress();
+    if (wasPeek) {
+      state.preview = 'off';
+      render();
+    }
+  }
+
+  previewBtn.addEventListener('pointerdown', (ev) => {
+    if (ev.button != null && ev.button !== 0) return;
+    if (state.preview === 'live') return; // 锁定态由 click 负责退出
+    startPress();
+    ev.preventDefault?.();
+  });
+  previewBtn.addEventListener('pointerup', () => {
+    endPress();
+  });
+  previewBtn.addEventListener('pointercancel', () => {
+    cancelPress();
+    if (state.preview === 'peek') {
+      state.preview = 'off';
+      render();
+    }
+  });
+  previewBtn.addEventListener('pointerleave', () => {
+    // 指针移出按钮也算松手，避免临时预览卡住
+    if (state.preview === 'peek') endPress();
+  });
+
+  previewBtn.addEventListener('click', () => {
+    // 长按松手后浏览器还会补一个 click，用 peekArmed 吃掉它
+    if (state.peekArmed) {
+      state.peekArmed = false;
+      return;
+    }
+    if (state.preview === 'live') {
+      state.preview = 'off';
+    } else {
+      state.preview = 'live';
+    }
+    render();
+  });
+
+  previewBarBtn.addEventListener('click', () => {
+    state.preview = 'off';
+    render();
+  });
+  // Esc 退出预览（在面板任意位置按）
+  panel.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    if (state.preview === 'off') return;
+    state.preview = 'off';
+    render();
+  });
 
   /** 切换表单/JSON：先无条件把界面切过去，再做解析与重绘，避免解析/渲染出错时卡在旧页签。 */
   function switchMode(mode) {
@@ -1457,6 +1588,8 @@ export function init(options = {}) {
   });
   closeEditorBtn.addEventListener('click', () => {
     state.editing = false;
+    state.preview = 'off';
+    cancelPress();
     render();
   });
   importApplyBtn.addEventListener('click', () => applyImport(importTextEl.value));
@@ -1490,63 +1623,13 @@ export function init(options = {}) {
     }
     state.draft = null;
     state.editing = false;
+    state.preview = 'off';
+    cancelPress();
     state.pageId = null;
     store.setSelectedId(id || null, activeScopeKey());
     if (!id) store.setSelectedId(null, 'global');
     render();
   });
-
-  // ---------- 拖动条 ----------
-  function bindSplitter() {
-    let drag = null;
-
-    const applyHeight = (h) => {
-      const max = Math.max(140, body.clientHeight ? body.clientHeight - 80 : 600);
-      const clamped = Math.min(max, Math.max(140, Math.round(h)));
-      state.editorHeight = clamped;
-      editor.style.height = `${clamped}px`;
-    };
-
-    const onMove = (ev) => {
-      if (!drag) return;
-      applyHeight(drag.height - (ev.clientY - drag.y));
-    };
-
-    const onUp = () => {
-      if (!drag) return;
-      drag = null;
-      body.classList.remove('is-dragging');
-      splitter.removeEventListener('pointermove', onMove);
-      globalThis.removeEventListener?.('pointerup', onUp);
-      globalThis.removeEventListener?.('pointercancel', onUp);
-      if (state.editorHeight) store.saveUi({ editorHeight: state.editorHeight });
-    };
-
-    splitter.addEventListener('pointerdown', (ev) => {
-      if (!state.editing) return;
-      const rect = editor.getBoundingClientRect();
-      drag = { y: ev.clientY, height: rect.height || editor.offsetHeight || 320 };
-      body.classList.add('is-dragging');
-      try {
-        splitter.setPointerCapture?.(ev.pointerId);
-      } catch {
-        /* 某些环境不支持 */
-      }
-      splitter.addEventListener('pointermove', onMove);
-      globalThis.addEventListener?.('pointerup', onUp);
-      globalThis.addEventListener?.('pointercancel', onUp);
-      ev.preventDefault?.();
-    });
-
-    // 双击恢复“自动比例”
-    splitter.addEventListener('dblclick', () => {
-      state.editorHeight = 0;
-      editor.style.height = '';
-      store.saveUi({ editorHeight: 0 });
-    });
-  }
-
-  bindSplitter();
 
   // ---------- 启动 ----------
   applyOpen(false);
@@ -1600,6 +1683,8 @@ export function init(options = {}) {
       state.unsub = null;
     }
     if (typeof cancelWait === 'function') cancelWait();
+    if (typeof cancelPress === 'function') cancelPress();
+    // 预览浮层也挂在 root 下（见 D-U24），root.remove() 会一并摘掉
     root.remove();
     if (globalThis.DSHUI === controller) delete globalThis.DSHUI;
   }
